@@ -92,6 +92,93 @@ async function startServer() {
     }
   });
 
+  // API Route for Real Video Transcription using Gemini
+  app.post('/api/transcribe', upload.single('video'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'Video file is required' });
+      }
+
+      const targetLang = req.body.targetLang || 'English';
+      const inputVideoPath = req.file.path;
+      const id = uuidv4();
+      const audioPath = `/tmp/${id}_audio.mp3`;
+
+      console.log(`Extracting audio for ${id}...`);
+
+      // 1. Extract audio from video
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(inputVideoPath)
+          .noVideo()
+          .audioCodec('libmp3lame')
+          .audioBitrate(128)
+          .on('end', () => resolve())
+          .on('error', (err) => reject(err))
+          .save(audioPath);
+      });
+
+      console.log(`Audio extracted. Sending to Gemini...`);
+
+      // 2. Upload audio to Gemini and process
+      const { GoogleGenAI, Type } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      const uploadedFile = await ai.files.upload({
+        file: audioPath,
+        mimeType: 'audio/mp3'
+      });
+
+      const prompt = `You are a professional video translator and subtitle generator. 
+      Listen to the provided audio. Transcribe and translate EVERYTHING spoken in the audio into ${targetLang}.
+      Cut the phrases into small subtitle blocks (usually 2 to 6 seconds).
+      Provide the response strictly as a JSON array.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          uploadedFile,
+          prompt
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                start: { type: Type.NUMBER, description: "Start time in seconds" },
+                end: { type: Type.NUMBER, description: "End time in seconds" },
+                text: { type: Type.STRING, description: "Spoken text" },
+                confidence: { type: Type.NUMBER, description: "Confidence score between 0.70 and 0.99" }
+              },
+              required: ["start", "end", "text", "confidence"]
+            }
+          }
+        }
+      });
+
+      const generatedData = JSON.parse(response.text || '[]');
+
+      // Cleanup
+      if (fs.existsSync(inputVideoPath)) fs.unlinkSync(inputVideoPath);
+      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+
+      // We should also delete from gemini files to not clutter, but SDK supports it
+      try {
+        await ai.files.delete({ name: uploadedFile.name });
+      } catch (e) {
+        console.log('Failed to delete gemini file', e);
+      }
+
+      res.json({ subtitles: generatedData });
+
+    } catch (e) {
+      console.error('Transcription error:', e);
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Internal server error processing transcription' });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

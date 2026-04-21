@@ -55,7 +55,7 @@ export function UploadModal({ isOpen, onClose }: { isOpen: boolean, onClose: () 
         progress: 0
       });
 
-      // Show artificial uploading setup progress
+        // Show artificial uploading setup progress
       updateProgress(id, 20);
 
       try {
@@ -70,40 +70,29 @@ export function UploadModal({ isOpen, onClose }: { isOpen: boolean, onClose: () 
         
         const targetLangName = langMap[targetLang] || 'English';
 
-        // Generate realistic mock transcription based on filename, duration, and target language
-        const prompt = `Generate a realistic fictional video transcript for a video titled "${fileName}".
-        The total video duration is ${duration.toFixed(1)} seconds.
-        Create a sequence of subtitles that spans this entire duration. 
-        Each subtitle usually lasts 2 to 6 seconds.
-        Make the spoken text contextually relevant to the title "${fileName}". 
-        Include hesitations or natural speech patterns.
-        IMPORTANT: The spoken text MUST be entirely written / translated in ${targetLangName}.
-        Provide the response strictly as a JSON array.`;
+        // Read video strictly to Blob
+        const responseFile = await fetch(videoUrl);
+        const blob = await responseFile.blob();
 
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  start: { type: Type.NUMBER, description: "Start time in seconds" },
-                  end: { type: Type.NUMBER, description: "End time in seconds" },
-                  text: { type: Type.STRING, description: "Spoken text" },
-                  confidence: { type: Type.NUMBER, description: "Confidence score between 0.70 and 0.99" }
-                },
-                required: ["start", "end", "text", "confidence"]
-              }
-            }
-          }
+        const formData = new FormData();
+        formData.append('video', blob, file.name);
+        formData.append('targetLang', targetLangName);
+
+        // Upload and process via our robust backend
+        const resObj = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: formData
         });
+
+        if (!resObj.ok) {
+          throw new Error('Failed to process video on server');
+        }
 
         updateProgress(id, 80);
 
-        const generatedData = JSON.parse(response.text.trim());
+        const generatedJson = await resObj.json();
+        const generatedData = generatedJson.subtitles || [];
+
         const subtitles = generatedData.map((item: any, i: number) => ({
           id: `sub-${i}-${Date.now()}`,
           start: item.start,
