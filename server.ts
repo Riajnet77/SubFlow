@@ -1,185 +1,272 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import cors from 'cors';
-import multer from 'multer';
-import ffmpeg from 'fluent-ffmpeg';
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import fs from 'fs';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import cors from "cors";
+import multer from "multer";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+import Groq from "groq-sdk";
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
-const upload = multer({ dest: '/tmp/uploads/' });
+// Ensure temp upload dir exists
+const UPLOAD_DIR = "/tmp/subflow_uploads";
+const WORK_DIR = "/tmp/subflow_work";
+[UPLOAD_DIR, WORK_DIR].forEach((dir) => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
+
+const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB max
+
+// Helper: safely delete a list of files
+function cleanupFiles(...paths: string[]) {
+  for (const p of paths) {
+    try {
+      if (p && fs.existsSync(p)) fs.unlinkSync(p);
+    } catch (_) {}
+  }
+}
+
+// Helper: format seconds → SRT timestamp
+function toSrtTime(seconds: number): string {
+  const ms = Math.round((seconds % 1) * 1000);
+  const s = Math.floor(seconds) % 60;
+  const m = Math.floor(seconds / 60) % 60;
+  const h = Math.floor(seconds / 3600);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
+}
+
+// Helper: generate SRT content from subtitle array
+function buildSrt(subtitles: { start: number; end: number; text: string }[]): string {
+  return subtitles
+    .map((sub, i) => `${i + 1}\n${toSrtTime(sub.start)} --> ${toSrtTime(sub.end)}\n${sub.text.trim()}`)
+    .join("\n\n") + "\n";
+}
+
+// Helper: extract audio from video with ffmpeg
+function extractAudio(inputPath: string, outputPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .noVideo()
+      .audioCodec("libmp3lame")
+      .audioBitrate(128)
+      .audioChannels(1) // mono saves space
+      .audioFrequency(16000) // Whisper works best at 16kHz
+      .on("end", resolve)
+      .on("error", reject)
+      .save(outputPath);
+  });
+}
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
 
-  // API Route for Video Rendering
-  app.post('/api/render', upload.single('video'), async (req, res) => {
-    try {
-      const subtitlesJson = req.body.subtitles;
-      if (!req.file || !subtitlesJson) {
-        return res.status(400).json({ error: 'Video file and subtitles are required' });
-      }
+  // ─── /api/transcribe ──────────────────────────────────────────────────────────
+  // Accepts: multipart/form-data with `video` file + `targetLang` (optional, default: original language)
+  // Returns: { subtitles: [{ start, end, text, confidence }] }
+  app.post("/api/transcribe", upload.single("video"), async (req, res) => {
+    const videoPath = req.file?.path ?? "";
+    const audioPath = path.join(WORK_DIR, `${uuidv4()}_audio.mp3`);
 
-      const subtitles = JSON.parse(subtitlesJson);
-      if (!Array.isArray(subtitles)) {
-        return res.status(400).json({ error: 'Subtitles must be an array' });
-      }
-
-      const inputVideoPath = req.file.path;
-      const id = uuidv4();
-      const srtPath = `/tmp/${id}.srt`;
-      const outputVideoPath = `/tmp/${id}_output.mp4`;
-
-      // Generate SRT content
-      let srtContent = '';
-      subtitles.forEach((sub, i) => {
-        const formatTime = (seconds: number) => {
-          const date = new Date(seconds * 1000);
-          const hh = String(date.getUTCHours()).padStart(2, '0');
-          const mm = String(date.getUTCMinutes()).padStart(2, '0');
-          const ss = String(date.getUTCSeconds()).padStart(2, '0');
-          const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
-          return `${hh}:${mm}:${ss},${ms}`;
-        };
-        srtContent += `${i + 1}\n${formatTime(sub.start)} --> ${formatTime(sub.end)}\n${sub.text}\n\n`;
-      });
-
-      fs.writeFileSync(srtPath, srtContent);
-
-      // We need to use a filter syntax for subtitles. 
-      // fluent-ffmpeg handles complex filters.
-      // Easiest is using vf subtitles filter but it must be an absolute path and needs escaping for windows/linux.
-      // Since container is linux:
-      
-      console.log(`Starting encode for ${id}...`);
-
-      ffmpeg(inputVideoPath)
-        .videoCodec('libx264')
-        // burn subtitles using subtitles filter
-        .outputOptions([
-           `-vf subtitles=${srtPath}`,
-           // hardware accel if available or just veryfast to save time
-           `-preset veryfast` 
-        ])
-        .on('end', () => {
-          console.log(`Encode finished for ${id}`);
-          
-          res.download(outputVideoPath, 'rendered_video.mp4', (err) => {
-            // cleanup temp files
-            if (fs.existsSync(inputVideoPath)) fs.unlinkSync(inputVideoPath);
-            if (fs.existsSync(srtPath)) fs.unlinkSync(srtPath);
-            if (fs.existsSync(outputVideoPath)) fs.unlinkSync(outputVideoPath);
-          });
-        })
-        .on('error', (err) => {
-          console.error(`Error encoding ${id}:`, err);
-          if (fs.existsSync(inputVideoPath)) fs.unlinkSync(inputVideoPath);
-          if (fs.existsSync(srtPath)) fs.unlinkSync(srtPath);
-          return res.status(500).json({ error: 'Rendering failed' });
-        })
-        .save(outputVideoPath);
-
-    } catch (e) {
-      console.error(e);
-      res.status(500).json({ error: 'Internal server error processing video' });
-    }
-  });
-
-  // API Route for Real Video Transcription using Gemini
-  app.post('/api/transcribe', upload.single('video'), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ error: 'Video file is required' });
+        res.status(400).json({ error: "Video file is required." });
+        return;
       }
 
-      const targetLang = req.body.targetLang || 'English';
-      const inputVideoPath = req.file.path;
-      const id = uuidv4();
-      const audioPath = `/tmp/${id}_audio.mp3`;
+      const targetLang: string = req.body.targetLang ?? "";
+      const groqApiKey = process.env.GROQ_API_KEY;
 
-      console.log(`Extracting audio for ${id}...`);
+      if (!groqApiKey) {
+        res.status(500).json({ error: "GROQ_API_KEY is not configured on the server." });
+        return;
+      }
 
-      // 1. Extract audio from video
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(inputVideoPath)
-          .noVideo()
-          .audioCodec('libmp3lame')
-          .audioBitrate(128)
-          .on('end', () => resolve())
-          .on('error', (err) => reject(err))
-          .save(audioPath);
-      });
+      const groq = new Groq({ apiKey: groqApiKey });
 
-      console.log(`Audio extracted. Sending to Gemini...`);
+      // 1. Extract audio
+      console.log(`[transcribe] Extracting audio from ${req.file.originalname}…`);
+      await extractAudio(videoPath, audioPath);
 
-      // 2. Upload audio to Gemini and process
-      const { GoogleGenAI, Type } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      // 2. Transcribe with Groq Whisper (with word-level timestamps)
+      console.log(`[transcribe] Sending to Groq Whisper…`);
 
-      const uploadedFile = await ai.files.upload({
-        file: audioPath,
-        mimeType: 'audio/mp3'
-      });
+      const whisperParams: Parameters<typeof groq.audio.transcriptions.create>[0] = {
+        file: fs.createReadStream(audioPath),
+        model: "whisper-large-v3-turbo",
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment"],
+        ...(targetLang && targetLang.toLowerCase() !== "original"
+          ? { language: undefined } // let whisper auto-detect, translate separately
+          : {}),
+      };
 
-      const prompt = `You are a professional video translator and subtitle generator. 
-      Listen to the provided audio. Transcribe and translate EVERYTHING spoken in the audio into ${targetLang}.
-      Cut the phrases into small subtitle blocks (usually 2 to 6 seconds).
-      Provide the response strictly as a JSON array.`;
+      const transcription = await groq.audio.transcriptions.create(whisperParams);
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          uploadedFile,
-          prompt
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                start: { type: Type.NUMBER, description: "Start time in seconds" },
-                end: { type: Type.NUMBER, description: "End time in seconds" },
-                text: { type: Type.STRING, description: "Spoken text" },
-                confidence: { type: Type.NUMBER, description: "Confidence score between 0.70 and 0.99" }
-              },
-              required: ["start", "end", "text", "confidence"]
-            }
+      // 3. Map Whisper segments → subtitle objects
+      type Segment = { start: number; end: number; text: string; avg_logprob?: number };
+      const segments: Segment[] = (transcription as any).segments ?? [];
+
+      let subtitles = segments.map((seg) => ({
+        start: seg.start,
+        end: seg.end,
+        text: seg.text.trim(),
+        confidence: seg.avg_logprob ? Math.min(0.99, Math.max(0.50, Math.exp(seg.avg_logprob))) : 0.85,
+      }));
+
+      // 4. Optional: translate to target language using Groq LLM (free)
+      if (targetLang && targetLang.toLowerCase() !== "original" && subtitles.length > 0) {
+        console.log(`[transcribe] Translating to ${targetLang}…`);
+        const texts = subtitles.map((s) => s.text);
+
+        const chatResponse = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            {
+              role: "system",
+              content: `You are a professional subtitle translator. Translate each subtitle line to ${targetLang}. Preserve line breaks. Return ONLY a JSON array of translated strings, same order and count as input. No explanation.`,
+            },
+            {
+              role: "user",
+              content: JSON.stringify(texts),
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 4096,
+        });
+
+        try {
+          const raw = chatResponse.choices[0].message.content ?? "[]";
+          const cleaned = raw.replace(/```json|```/g, "").trim();
+          const translated: string[] = JSON.parse(cleaned);
+          if (Array.isArray(translated) && translated.length === subtitles.length) {
+            subtitles = subtitles.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
           }
+        } catch (e) {
+          console.warn("[transcribe] Translation parse failed, keeping original text.");
         }
-      });
-
-      const generatedData = JSON.parse(response.text || '[]');
-
-      // Cleanup
-      if (fs.existsSync(inputVideoPath)) fs.unlinkSync(inputVideoPath);
-      if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-
-      // We should also delete from gemini files to not clutter, but SDK supports it
-      try {
-        await ai.files.delete({ name: uploadedFile.name });
-      } catch (e) {
-        console.log('Failed to delete gemini file', e);
       }
 
-      res.json({ subtitles: generatedData });
-
-    } catch (e) {
-      console.error('Transcription error:', e);
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: 'Internal server error processing transcription' });
+      res.json({ subtitles });
+    } catch (err: any) {
+      console.error("[transcribe] Error:", err?.message ?? err);
+      res.status(500).json({ error: err?.message ?? "Transcription failed." });
+    } finally {
+      cleanupFiles(videoPath, audioPath);
     }
   });
 
-  // Vite middleware for development
+  // ─── /api/render ──────────────────────────────────────────────────────────────
+  // Accepts: multipart/form-data with `video` file + `subtitles` JSON string
+  // Returns: .mp4 with burned-in subtitles
+  app.post("/api/render", upload.single("video"), async (req, res) => {
+    const videoPath = req.file?.path ?? "";
+    const id = uuidv4();
+    const srtPath = path.join(WORK_DIR, `${id}.srt`);
+    const outputPath = path.join(WORK_DIR, `${id}_output.mp4`);
+
+    try {
+      if (!req.file || !req.body.subtitles) {
+        res.status(400).json({ error: "Video file and subtitles are required." });
+        return;
+      }
+
+      const subtitles = JSON.parse(req.body.subtitles);
+      if (!Array.isArray(subtitles) || subtitles.length === 0) {
+        res.status(400).json({ error: "Subtitles must be a non-empty array." });
+        return;
+      }
+
+      // Write SRT file
+      fs.writeFileSync(srtPath, buildSrt(subtitles));
+
+      // Burn subtitles with ffmpeg
+      // Escape the srt path for the subtitles filter (handles spaces & special chars)
+      const escapedSrt = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+
+      console.log(`[render] Encoding ${req.file.originalname}…`);
+
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(videoPath)
+          .videoCodec("libx264")
+          .outputOptions([
+            `-vf subtitles='${escapedSrt}':force_style='FontName=Arial,FontSize=22,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Outline=1,Shadow=1'`,
+            "-preset veryfast",
+            "-crf 23",
+            "-movflags +faststart",
+          ])
+          .audioCodec("aac")
+          .audioBitrate("128k")
+          .on("end", resolve)
+          .on("error", reject)
+          .save(outputPath);
+      });
+
+      console.log(`[render] Done. Sending file…`);
+
+      res.download(outputPath, "subflow_export.mp4", () => {
+        cleanupFiles(videoPath, srtPath, outputPath);
+      });
+    } catch (err: any) {
+      console.error("[render] Error:", err?.message ?? err);
+      cleanupFiles(videoPath, srtPath, outputPath);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err?.message ?? "Render failed." });
+      }
+    }
+  });
+
+  // ─── /api/export/srt ─────────────────────────────────────────────────────────
+  // Quick SRT download without re-rendering the video
+  app.post("/api/export/srt", (req, res) => {
+    try {
+      const { subtitles } = req.body;
+      if (!Array.isArray(subtitles)) {
+        res.status(400).json({ error: "subtitles array required." });
+        return;
+      }
+      const srt = buildSrt(subtitles);
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="subtitles.srt"');
+      res.send(srt);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
+  // ─── /api/export/vtt ─────────────────────────────────────────────────────────
+  app.post("/api/export/vtt", (req, res) => {
+    try {
+      const { subtitles } = req.body;
+      if (!Array.isArray(subtitles)) {
+        res.status(400).json({ error: "subtitles array required." });
+        return;
+      }
+      const vtt =
+        "WEBVTT\n\n" +
+        subtitles
+          .map((s, i) => {
+            const toVttTime = (sec: number) => toSrtTime(sec).replace(",", ".");
+            return `${i + 1}\n${toVttTime(s.start)} --> ${toVttTime(s.end)}\n${s.text.trim()}`;
+          })
+          .join("\n\n") +
+        "\n";
+
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="subtitles.vtt"');
+      res.send(vtt);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message });
+    }
+  });
+
+  // ─── Vite / static serving ────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -187,16 +274,20 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    // Only catch non-API routes for SPA fallback
+    app.get(/^(?!\/api\/).*$/, (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`\n🎬 SubFlow running → http://localhost:${PORT}\n`);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
