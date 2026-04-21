@@ -7,6 +7,15 @@ interface Subtitle {
   confidence: number;
 }
 
+interface SubStyle {
+  fontSize: number;
+  fontName: string;
+  position: "bottom" | "top" | "middle";
+  primaryColor: string;
+  outlineColor: string;
+  bgOpacity: number;
+}
+
 type Step = "upload" | "processing" | "edit" | "export";
 
 const LANGUAGES = [
@@ -25,12 +34,23 @@ const LANGUAGES = [
   { code: "Hindi", label: "Hindi" },
 ];
 
+const FONTS = ["Arial", "Impact", "Georgia", "Verdana", "Trebuchet MS", "Comic Sans MS", "Courier New", "Tahoma"];
+
+const DEFAULT_STYLE: SubStyle = {
+  fontSize: 18,
+  fontName: "Arial",
+  position: "bottom",
+  primaryColor: "#FFFFFF",
+  outlineColor: "#000000",
+  bgOpacity: 0,
+};
+
 function toTimecode(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   const ms = Math.round((seconds % 1) * 1000);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
 }
 
 function formatFileSize(bytes: number): string {
@@ -38,26 +58,17 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// ─── Upload Zone ──────────────────────────────────────────────────────────────
 function UploadZone({ onFile }: { onFile: (file: File) => void }) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDrag(false);
-    const file = e.dataTransfer.files[0];
-    if (file) onFile(file);
-  };
-
   return (
-    <div
-      className={`upload-zone ${drag ? "active" : ""}`}
+    <div className={`upload-zone ${drag ? "active" : ""}`}
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={() => setDrag(false)}
-      onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
-    >
-      <input ref={inputRef} type="file" accept="video/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}/>
+      onDrop={(e: DragEvent<HTMLDivElement>) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
+      onClick={() => inputRef.current?.click()}>
+      <input ref={inputRef} type="file" accept="video/*" style={{ display:"none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}/>
       <div className="upload-icon">
         <svg viewBox="0 0 48 48" fill="none">
           <rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2"/>
@@ -75,6 +86,7 @@ function UploadZone({ onFile }: { onFile: (file: File) => void }) {
   );
 }
 
+// ─── Processing View ──────────────────────────────────────────────────────────
 function ProcessingView({ fileName }: { fileName: string }) {
   const [dots, setDots] = useState(".");
   useEffect(() => {
@@ -104,6 +116,97 @@ function ProcessingView({ fileName }: { fileName: string }) {
   );
 }
 
+// ─── Style Panel ──────────────────────────────────────────────────────────────
+function StylePanel({ style, onChange }: { style: SubStyle; onChange: (s: SubStyle) => void }) {
+  const set = (patch: Partial<SubStyle>) => onChange({ ...style, ...patch });
+  return (
+    <div className="style-panel">
+      <div className="style-panel-title">Subtitle Style</div>
+      <div className="style-grid">
+
+        {/* Font */}
+        <div className="style-field">
+          <label>Font</label>
+          <select value={style.fontName} onChange={(e) => set({ fontName: e.target.value })}>
+            {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </div>
+
+        {/* Size */}
+        <div className="style-field">
+          <label>Size <span className="style-val">{style.fontSize}px</span></label>
+          <input type="range" min={12} max={48} value={style.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })}/>
+        </div>
+
+        {/* Position */}
+        <div className="style-field">
+          <label>Position</label>
+          <div className="pos-group">
+            {(["top","middle","bottom"] as const).map(p => (
+              <button key={p} className={`pos-btn ${style.position === p ? "active" : ""}`} onClick={() => set({ position: p })}>
+                {p === "top" ? "▲ Top" : p === "middle" ? "● Middle" : "▼ Bottom"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Text color */}
+        <div className="style-field">
+          <label>Text color</label>
+          <div className="color-row">
+            <input type="color" value={style.primaryColor} onChange={(e) => set({ primaryColor: e.target.value })}/>
+            <span className="color-val">{style.primaryColor}</span>
+            <div className="color-presets">
+              {["#FFFFFF","#FFFF00","#00FFFF","#FF6B6B","#000000"].map(c => (
+                <button key={c} className={`color-dot ${style.primaryColor === c ? "active" : ""}`} style={{ background: c }} onClick={() => set({ primaryColor: c })}/>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Outline color */}
+        <div className="style-field">
+          <label>Outline color</label>
+          <div className="color-row">
+            <input type="color" value={style.outlineColor} onChange={(e) => set({ outlineColor: e.target.value })}/>
+            <span className="color-val">{style.outlineColor}</span>
+            <div className="color-presets">
+              {["#000000","#FFFFFF","#1a1a2e","#2d1b69","#FF6B6B"].map(c => (
+                <button key={c} className={`color-dot ${style.outlineColor === c ? "active" : ""}`} style={{ background: c, border: c === "#FFFFFF" ? "1px solid #444" : "none" }} onClick={() => set({ outlineColor: c })}/>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Background box */}
+        <div className="style-field">
+          <label>Background box <span className="style-val">{style.bgOpacity === 0 ? "off" : `${Math.round(style.bgOpacity * 100)}%`}</span></label>
+          <input type="range" min={0} max={1} step={0.1} value={style.bgOpacity} onChange={(e) => set({ bgOpacity: Number(e.target.value) })}/>
+        </div>
+
+      </div>
+
+      {/* Preview */}
+      <div className="sub-preview" style={{ background: "#111" }}>
+        <div className={`sub-preview-pos sub-preview-${style.position}`}>
+          <span className="sub-preview-text" style={{
+            fontFamily: style.fontName,
+            fontSize: Math.max(12, style.fontSize * 0.7) + "px",
+            color: style.primaryColor,
+            background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+            padding: style.bgOpacity > 0 ? "4px 10px" : "0",
+            borderRadius: style.bgOpacity > 0 ? "4px" : "0",
+            textShadow: style.bgOpacity === 0 ? `1px 1px 2px ${style.outlineColor}, -1px -1px 2px ${style.outlineColor}, 1px -1px 2px ${style.outlineColor}, -1px 1px 2px ${style.outlineColor}` : "none",
+          }}>
+            Sample subtitle text
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Subtitle Editor ──────────────────────────────────────────────────────────
 function SubtitleEditor({ subtitles, onChange }: { subtitles: Subtitle[]; onChange: (s: Subtitle[]) => void }) {
   const updateText = (i: number, text: string) => { const n = [...subtitles]; n[i] = { ...n[i], text }; onChange(n); };
   const updateTime = (i: number, field: "start" | "end", value: string) => {
@@ -138,7 +241,8 @@ function SubtitleEditor({ subtitles, onChange }: { subtitles: Subtitle[]; onChan
   );
 }
 
-function ExportPanel({ subtitles, videoFile, onBack }: { subtitles: Subtitle[]; videoFile: File | null; onBack: () => void }) {
+// ─── Export Panel ─────────────────────────────────────────────────────────────
+function ExportPanel({ subtitles, videoFile, style, onBack }: { subtitles: Subtitle[]; videoFile: File | null; style: SubStyle; onBack: () => void }) {
   const [rendering, setRendering] = useState(false);
   const [renderDone, setRenderDone] = useState(false);
 
@@ -152,6 +256,7 @@ function ExportPanel({ subtitles, videoFile, onBack }: { subtitles: Subtitle[]; 
       const form = new FormData();
       form.append("video", videoFile);
       form.append("subtitles", JSON.stringify(subtitles));
+      form.append("style", JSON.stringify(style));
       const res = await fetch("/api/render", { method: "POST", body: form });
       if (!res.ok) throw new Error("Render failed");
       dl(URL.createObjectURL(await res.blob()), "subflow_export.mp4");
@@ -165,13 +270,13 @@ function ExportPanel({ subtitles, videoFile, onBack }: { subtitles: Subtitle[]; 
       <h3>Export</h3>
       <p className="export-sub">Choose your output format</p>
       <div className="export-grid">
-        <button className="export-card" onClick={() => post("/api/export/srt", "subtitles.srt")}><span className="export-icon">📄</span><span className="export-label">SRT File</span><span className="export-desc">Compatible with most players</span></button>
-        <button className="export-card" onClick={() => post("/api/export/vtt", "subtitles.vtt")}><span className="export-icon">🌐</span><span className="export-label">WebVTT</span><span className="export-desc">For web players & browsers</span></button>
+        <button className="export-card" onClick={() => post("/api/export/srt","subtitles.srt")}><span className="export-icon">📄</span><span className="export-label">SRT File</span><span className="export-desc">Compatible with most players</span></button>
+        <button className="export-card" onClick={() => post("/api/export/vtt","subtitles.vtt")}><span className="export-icon">🌐</span><span className="export-label">WebVTT</span><span className="export-desc">For web players & browsers</span></button>
         <button className="export-card" onClick={() => navigator.clipboard.writeText(subtitles.map(s => s.text).join("\n"))}><span className="export-icon">📋</span><span className="export-label">Copy Text</span><span className="export-desc">Plain transcript to clipboard</span></button>
-        <button className={`export-card accent ${rendering ? "loading" : ""} ${renderDone ? "done" : ""}`} onClick={renderVideo} disabled={rendering || !videoFile}>
-          <span className="export-icon">{renderDone ? "✅" : "🎬"}</span>
-          <span className="export-label">{rendering ? "Rendering…" : renderDone ? "Downloaded!" : "Burn to Video"}</span>
-          <span className="export-desc">Embed subtitles into MP4</span>
+        <button className={`export-card accent ${rendering?"loading":""} ${renderDone?"done":""}`} onClick={renderVideo} disabled={rendering||!videoFile}>
+          <span className="export-icon">{renderDone?"✅":"🎬"}</span>
+          <span className="export-label">{rendering?"Rendering…":renderDone?"Downloaded!":"Burn to Video"}</span>
+          <span className="export-desc">Embed subtitles with your style</span>
         </button>
       </div>
       <button className="btn-ghost back-btn" onClick={onBack}>← Edit subtitles</button>
@@ -179,11 +284,13 @@ function ExportPanel({ subtitles, videoFile, onBack }: { subtitles: Subtitle[]; 
   );
 }
 
+// ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [step, setStep] = useState<Step>("upload");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [targetLang, setTargetLang] = useState("original");
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
+  const [style, setStyle] = useState<SubStyle>(DEFAULT_STYLE);
   const [error, setError] = useState<string | null>(null);
 
   const handleFile = useCallback((file: File) => { setVideoFile(file); setError(null); }, []);
@@ -207,7 +314,7 @@ export default function App() {
     }
   };
 
-  const stepIndex = ["upload", "processing", "edit", "export"].indexOf(step);
+  const stepIndex = ["upload","processing","edit","export"].indexOf(step);
 
   return (
     <>
@@ -226,8 +333,8 @@ export default function App() {
             <span className="logo-text">SubFlow</span>
           </div>
           <nav className="steps-nav">
-            {[1,2,3,4].map((n, i) => (
-              <span key={n} className={`step-dot ${stepIndex === i ? "active" : ""} ${stepIndex > i ? "done" : ""}`}>{n}</span>
+            {[1,2,3,4].map((n,i) => (
+              <span key={n} className={`step-dot ${stepIndex===i?"active":""} ${stepIndex>i?"done":""}`}>{n}</span>
             ))}
           </nav>
         </header>
@@ -265,22 +372,27 @@ export default function App() {
             </div>
           )}
           {step === "processing" && (
-            <div className="panel centered fade-in"><ProcessingView fileName={videoFile?.name ?? ""} /></div>
+            <div className="panel centered fade-in"><ProcessingView fileName={videoFile?.name??""}/></div>
           )}
           {step === "edit" && (
             <div className="panel wide fade-in">
               <div className="edit-header">
-                <div><h2>Review subtitles</h2><p className="edit-sub">Click any line to edit text or timecodes</p></div>
+                <div><h2>Review subtitles</h2><p className="edit-sub">Edit text, timecodes and style</p></div>
                 <div className="edit-actions">
                   <button className="btn-outline" onClick={() => setStep("upload")}>← New video</button>
                   <button className="btn-primary" onClick={() => setStep("export")}>Export →</button>
                 </div>
               </div>
-              <SubtitleEditor subtitles={subtitles} onChange={setSubtitles} />
+              <div className="edit-columns">
+                <SubtitleEditor subtitles={subtitles} onChange={setSubtitles}/>
+                <StylePanel style={style} onChange={setStyle}/>
+              </div>
             </div>
           )}
           {step === "export" && (
-            <div className="panel fade-in"><ExportPanel subtitles={subtitles} videoFile={videoFile} onBack={() => setStep("edit")} /></div>
+            <div className="panel fade-in">
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={style} onBack={() => setStep("edit")}/>
+            </div>
           )}
         </main>
       </div>
@@ -290,12 +402,12 @@ export default function App() {
 
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg:#0d0f12; --surface:#161920; --surface2:#1e2229; --border:rgba(255,255,255,0.07);
-    --text:#e8eaf0; --muted:#6b7280; --amber:#f59e0b; --amber-dim:rgba(245,158,11,0.12);
-    --amber-glow:rgba(245,158,11,0.25); --green:#34d399; --red:#f87171;
-    --radius:10px; --radius-lg:16px;
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d0f12;--surface:#161920;--surface2:#1e2229;--border:rgba(255,255,255,0.07);
+    --text:#e8eaf0;--muted:#6b7280;--amber:#f59e0b;--amber-dim:rgba(245,158,11,0.12);
+    --amber-glow:rgba(245,158,11,0.25);--green:#34d399;--red:#f87171;
+    --radius:10px;--radius-lg:16px;
   }
   html,body,#root{height:100%}
   body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
@@ -311,7 +423,7 @@ const CSS = `
   .main{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:48px 24px}
   .panel{width:100%;max-width:580px}
   .panel.centered{display:flex;justify-content:center}
-  .panel.wide{max-width:800px}
+  .panel.wide{max-width:1100px}
   @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
   .fade-in{animation:fadeUp 0.4s ease both}
   .panel-hero{margin-bottom:36px}
@@ -339,8 +451,8 @@ const CSS = `
   .clear-btn:hover{color:var(--red)}
   .lang-selector{display:flex;flex-direction:column;gap:8px}
   .lang-selector label{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:0.05em;text-transform:uppercase}
-  .lang-selector select{background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;padding:10px 14px;cursor:pointer;outline:none;transition:border-color 0.2s}
-  .lang-selector select:focus{border-color:var(--amber)}
+  .lang-selector select,.style-panel select{background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;padding:10px 14px;cursor:pointer;outline:none;transition:border-color 0.2s;width:100%}
+  .lang-selector select:focus,.style-panel select:focus{border-color:var(--amber)}
   .processing-view{text-align:center;padding:60px 32px;display:flex;flex-direction:column;align-items:center;gap:20px}
   .processing-spinner{position:relative;width:72px;height:72px;display:flex;align-items:center;justify-content:center}
   .spinner-ring{position:absolute;inset:0;color:var(--amber);animation:spin 1.4s linear infinite}
@@ -357,6 +469,7 @@ const CSS = `
   .edit-sub{color:var(--muted);font-size:13px;margin-top:4px}
   .edit-actions{display:flex;gap:10px}
   .edit-actions .btn-primary{width:auto}
+  .edit-columns{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start}
   .subtitle-editor{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
   .editor-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
   .editor-header h3{font-family:'Syne',sans-serif;font-weight:700;font-size:15px}
@@ -377,6 +490,32 @@ const CSS = `
   .confidence-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:help}
   .delete-btn{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 5px;border-radius:4px;transition:color 0.2s}
   .delete-btn:hover{color:var(--red)}
+
+  /* Style panel */
+  .style-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;display:flex;flex-direction:column;gap:16px;position:sticky;top:80px}
+  .style-panel-title{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+  .style-grid{display:flex;flex-direction:column;gap:14px}
+  .style-field{display:flex;flex-direction:column;gap:6px}
+  .style-field label{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0.05em;text-transform:uppercase;display:flex;justify-content:space-between}
+  .style-val{color:var(--amber);font-family:'JetBrains Mono',monospace}
+  .style-field input[type=range]{width:100%;accent-color:var(--amber);height:4px;cursor:pointer}
+  .pos-group{display:flex;gap:6px}
+  .pos-btn{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--muted);font-size:11px;padding:7px 4px;cursor:pointer;transition:all 0.2s;text-align:center}
+  .pos-btn.active{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .color-row{display:flex;align-items:center;gap:8px}
+  .color-row input[type=color]{width:32px;height:32px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px}
+  .color-val{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)}
+  .color-presets{display:flex;gap:5px;margin-left:auto}
+  .color-dot{width:20px;height:20px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all 0.15s}
+  .color-dot.active{border-color:var(--amber);transform:scale(1.2)}
+  .sub-preview{border-radius:10px;height:90px;position:relative;overflow:hidden;margin-top:4px}
+  .sub-preview-pos{position:absolute;left:0;right:0;display:flex;justify-content:center;padding:8px}
+  .sub-preview-bottom{bottom:0}
+  .sub-preview-top{top:0}
+  .sub-preview-middle{top:50%;transform:translateY(-50%)}
+  .sub-preview-text{display:inline-block;line-height:1.3;text-align:center;max-width:90%}
+
+  /* Export */
   .export-panel{display:flex;flex-direction:column;gap:24px}
   .export-panel h3{font-family:'Syne',sans-serif;font-weight:800;font-size:28px}
   .export-sub{color:var(--muted);margin-top:-16px}
@@ -390,5 +529,7 @@ const CSS = `
   .export-label{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--text)}
   .export-desc{font-size:12px;color:var(--muted)}
   .back-btn{align-self:flex-start}
+
+  @media(max-width:800px){.edit-columns{grid-template-columns:1fr}}
   @media(max-width:600px){.header{padding:12px 16px}.main{padding:32px 16px}.panel-hero h1{font-size:26px}.export-grid{grid-template-columns:1fr}.edit-header{flex-direction:column}}
 `;
