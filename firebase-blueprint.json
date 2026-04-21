@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "Video transcription project containing metadata, video URLs, and transcribed subtitles",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who owns this project"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["processing", "ready", "failed"]
+        },
+        "videoUrl": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "sourceLang": {
+          "type": "string"
+        },
+        "targetLang": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "thumbnailUrl": {
+          "type": "string"
+        },
+        "subtitles": {
+          "type": "array",
+          "description": "Array of subtitle blocks"
+        }
+      },
+      "required": ["userId", "name", "status"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/Project"
+      },
+      "description": "Projects owned by users"
+    }
+  }
+}

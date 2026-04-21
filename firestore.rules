@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // Helper to validate a Project
+    function isValidProject(validData) {
+      return validData.keys().hasAll(['userId', 'name', 'status'])
+        && validData.userId == request.auth.uid
+        && validData.name is string && validData.name.size() > 0 && validData.name.size() <= 200
+        && validData.status in ["processing", "ready", "failed"]
+        && (validData.get('videoUrl', '') is string)
+        && (validData.get('duration', 0) is number)
+        && (validData.get('sourceLang', '') is string)
+        && (validData.get('targetLang', '') is string)
+        && (validData.get('progress', 0) is number)
+        && (validData.get('createdAt', '') is string)
+        && (validData.get('thumbnailUrl', '') is string)
+        && (validData.get('subtitles', []) is list)
+        && validData.get('subtitles', []).size() <= 5000;
+    }
+
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid && isValidId(projectId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+        && isValidId(projectId)
+        && isValidProject(incoming())
+        && incoming().userId == request.auth.uid;
+        
+      allow update: if isSignedIn() 
+        && isValidId(projectId)
+        && existing().userId == request.auth.uid
+        && isValidProject(incoming())
+        && incoming().userId == existing().userId
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'status', 'videoUrl', 'duration', 'sourceLang', 'targetLang',
+            'progress', 'thumbnailUrl', 'subtitles'
+          ])
+        );
+        
+      allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
+    }
+  }
+}
