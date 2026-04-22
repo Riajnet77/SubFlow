@@ -366,7 +366,10 @@ export default function App(){
                         }>
                           <span className="sub-overlay-text" style={{
                             fontFamily:style.fontName,
-                            fontSize:Math.max(12,style.fontSize*0.6)+"px",
+                            fontSize:Math.max(10,style.fontSize*0.5)+"px",
+                            maxWidth:"90%",
+                            wordBreak:"break-word",
+                            whiteSpace:"pre-wrap",
                             color:style.primaryColor,
                             background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
                             padding:style.bgOpacity>0?"3px 10px":"0",
@@ -468,7 +471,7 @@ const CSS = `
   .video-player{position:relative;background:#000;border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:16/9}
   .video-el{width:100%;height:100%;display:block;object-fit:contain}
   .sub-overlay{position:absolute;left:0;right:0;display:flex;justify-content:center;padding:0 16px;pointer-events:none}
-  .sub-overlay-text{display:inline-block;line-height:1.3;text-align:center;max-width:90%;word-break:break-word}
+  .sub-overlay-text{display:inline-block;line-height:1.3;text-align:center;max-width:88%;word-break:break-word;white-space:pre-wrap;overflow-wrap:break-word;}
   .style-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;display:flex;flex-direction:column;gap:14px}
   .style-panel-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
   .style-grid{display:flex;flex-direction:column;gap:12px}
