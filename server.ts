@@ -218,11 +218,10 @@ async function startServer() {
       };
 
       // Vertical alignment: 2=bottom, 8=top, 5=middle
-      const alignMap: Record<string, number> = { bottom: 2, top: 8, middle: 5 };
-      const alignment = alignMap[position] ?? 2;
-
-      // MarginV: distance from edge
-      const marginV = position === "top" ? 20 : 20;
+      // positionY: 0=top, 100=bottom → ASS alignment + MarginV
+      const posY = style.positionY ?? 85;
+      const alignment = posY < 33 ? 8 : posY < 66 ? 5 : 2;
+      const marginV = alignment === 8 ? Math.round(posY * 3) : alignment === 2 ? Math.round((100 - posY) * 3) : 0;
 
       // BackColour opacity: &HAA000000 where AA=00 is opaque, FF is transparent
       const bgAlpha = Math.round((1 - bgOpacity) * 255).toString(16).padStart(2, "0").toUpperCase();
