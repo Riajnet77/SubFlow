@@ -1,7 +1,12 @@
 import { useState, useRef, useCallback, useEffect, DragEvent } from "react";
 
 interface Subtitle { start: number; end: number; text: string; confidence: number; }
-interface SubStyle { fontSize: number; fontName: string; position: "bottom"|"top"|"middle"; primaryColor: string; outlineColor: string; bgOpacity: number; }
+interface SubStyle {
+  fontSize: number; fontName: string;
+  primaryColor: string; outlineColor: string; bgOpacity: number;
+  positionY: number; // 0 = top, 100 = bottom
+  preset: string;
+}
 type Step = "upload"|"processing"|"edit"|"export";
 
 const LANGUAGES = [
@@ -13,12 +18,40 @@ const LANGUAGES = [
   {code:"Chinese",label:"Chinese (Simplified)"},{code:"Russian",label:"Russian"},
   {code:"Arabic",label:"Arabic"},{code:"Hindi",label:"Hindi"},
 ];
-const FONTS = ["Arial","Impact","Georgia","Verdana","Trebuchet MS","Tahoma","Courier New"];
-const DEFAULT_STYLE: SubStyle = {fontSize:18,fontName:"Arial",position:"bottom",primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0};
 
-function toTimecode(s:number){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000);return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;}
+const FONTS = ["Arial","Impact","Georgia","Verdana","Trebuchet MS","Tahoma","Courier New"];
+
+// ─── CapCut-style presets ─────────────────────────────────────────────────────
+const PRESETS: Record<string, Partial<SubStyle>> = {
+  custom:   {},
+  impact:   { fontName:"Impact", fontSize:28, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0 },
+  neon:     { fontName:"Arial",  fontSize:22, primaryColor:"#00FFFF", outlineColor:"#0000FF", bgOpacity:0 },
+  fire:     { fontName:"Impact", fontSize:26, primaryColor:"#FF4500", outlineColor:"#FFD700", bgOpacity:0 },
+  ice:      { fontName:"Arial",  fontSize:22, primaryColor:"#E0F7FF", outlineColor:"#0099CC", bgOpacity:0.3 },
+  cinema:   { fontName:"Georgia",fontSize:20, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0.6 },
+  minimal:  { fontName:"Arial",  fontSize:18, primaryColor:"#FFFFFF", outlineColor:"#333333", bgOpacity:0 },
+  bold:     { fontName:"Impact", fontSize:32, primaryColor:"#FFFF00", outlineColor:"#000000", bgOpacity:0 },
+  subtitle: { fontName:"Arial",  fontSize:18, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0.5 },
+};
+
+const PRESET_LABELS: Record<string, string> = {
+  custom:"✏️ Custom", impact:"💥 Impact", neon:"🌀 Neon", fire:"🔥 Fire",
+  ice:"❄️ Ice", cinema:"🎬 Cinema", minimal:"◻️ Minimal", bold:"⚡ Bold", subtitle:"📺 Subtitle",
+};
+
+const DEFAULT_STYLE: SubStyle = {
+  fontSize:20, fontName:"Arial", primaryColor:"#FFFFFF", outlineColor:"#000000",
+  bgOpacity:0, positionY:85, preset:"impact",
+  ...PRESETS.impact,
+};
+
+function toTimecode(s:number){
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000);
+  return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
+}
 function formatSize(b:number){return b<1024*1024?`${(b/1024).toFixed(1)} KB`:`${(b/(1024*1024)).toFixed(1)} MB`;}
 
+// ─── Upload Zone ──────────────────────────────────────────────────────────────
 function UploadZone({onFile}:{onFile:(f:File)=>void}){
   const [drag,setDrag]=useState(false);
   const ref=useRef<HTMLInputElement>(null);
@@ -39,6 +72,7 @@ function UploadZone({onFile}:{onFile:(f:File)=>void}){
   );
 }
 
+// ─── Processing ───────────────────────────────────────────────────────────────
 function ProcessingView({fileName}:{fileName:string}){
   const [dots,setDots]=useState(".");
   useEffect(()=>{const id=setInterval(()=>setDots(d=>d.length>=3?".":d+"."),600);return()=>clearInterval(id);},[]);
@@ -59,120 +93,113 @@ function ProcessingView({fileName}:{fileName:string}){
   );
 }
 
-// ─── Video Player with live subtitle overlay ──────────────────────────────────
-function VideoPlayer({file,subtitles,style}:{file:File;subtitles:Subtitle[];style:SubStyle}){
-  const videoRef=useRef<HTMLVideoElement>(null);
-  const [currentSub,setCurrentSub]=useState<string>("");
-  const [currentTime,setCurrentTime]=useState(0);
-
-  const urlRef=useRef<string>("");
-  useEffect(()=>{
-    const url=URL.createObjectURL(file);
-    urlRef.current=url;
-    return()=>URL.revokeObjectURL(url);
-  },[file]);
-
-  useEffect(()=>{
-    const sub=subtitles.find(s=>currentTime>=s.start&&currentTime<=s.end);
-    setCurrentSub(sub?.text??"");
-  },[currentTime,subtitles]);
-
-  const posStyle:{[k:string]:React.CSSProperties}={
-    bottom:{bottom:16,top:"auto",transform:"none"},
-    top:{top:16,bottom:"auto",transform:"none"},
-    middle:{top:"50%",bottom:"auto",transform:"translateY(-50%)"},
+// ─── Style Panel ──────────────────────────────────────────────────────────────
+function StylePanel({style,onChange}:{style:SubStyle;onChange:(s:SubStyle)=>void}){
+  const set=(p:Partial<SubStyle>)=>onChange({...style,...p,preset:"custom"});
+  const applyPreset=(name:string)=>{
+    if(name==="custom")return;
+    onChange({...style,...PRESETS[name],preset:name});
   };
 
   return(
-    <div className="video-player">
-      <video
-        ref={videoRef}
-        src={urlRef.current}
-        controls
-        className="video-el"
-        onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-      />
-      {currentSub&&(
-        <div className="sub-overlay" style={posStyle[style.position]}>
-          <span className="sub-overlay-text" style={{
-            fontFamily:style.fontName,
-            fontSize:style.fontSize+"px",
-            color:style.primaryColor,
-            background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
-            padding:style.bgOpacity>0?"4px 12px":"0",
-            borderRadius:style.bgOpacity>0?"4px":"0",
-            textShadow:style.bgOpacity===0?`1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`:"none",
-          }}>{currentSub}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Style Panel ──────────────────────────────────────────────────────────────
-function StylePanel({style,onChange}:{style:SubStyle;onChange:(s:SubStyle)=>void}){
-  const set=(p:Partial<SubStyle>)=>onChange({...style,...p});
-  return(
     <div className="style-panel">
       <div className="style-panel-title">Subtitle Style</div>
-      <div className="style-grid">
-        <div className="style-field">
-          <label>Font</label>
-          <select value={style.fontName} onChange={e=>set({fontName:e.target.value})}>
-            {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
-          </select>
+
+      {/* Presets */}
+      <div className="style-field">
+        <label>Preset</label>
+        <div className="preset-grid">
+          {Object.entries(PRESET_LABELS).map(([key,label])=>(
+            <button key={key} className={`preset-btn ${style.preset===key?"active":""}`} onClick={()=>applyPreset(key)}>
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="style-field">
-          <label>Size <span className="style-val">{style.fontSize}px</span></label>
-          <input type="range" min={12} max={48} value={style.fontSize} onChange={e=>set({fontSize:Number(e.target.value)})}/>
-        </div>
-        <div className="style-field">
-          <label>Position</label>
-          <div className="pos-group">
-            {(["top","middle","bottom"] as const).map(p=>(
-              <button key={p} className={`pos-btn ${style.position===p?"active":""}`} onClick={()=>set({position:p})}>
-                {p==="top"?"▲ Top":p==="middle"?"● Mid":"▼ Bottom"}
-              </button>
+      </div>
+
+      {/* Font */}
+      <div className="style-field">
+        <label>Font</label>
+        <select value={style.fontName} onChange={e=>set({fontName:e.target.value})}>
+          {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
+        </select>
+      </div>
+
+      {/* Size */}
+      <div className="style-field">
+        <label>Size <span className="style-val">{style.fontSize}px</span></label>
+        <input type="range" min={12} max={52} value={style.fontSize} onChange={e=>set({fontSize:Number(e.target.value)})}/>
+      </div>
+
+      {/* Position Y */}
+      <div className="style-field">
+        <label>Vertical position <span className="style-val">{style.positionY}%</span></label>
+        <input type="range" min={5} max={95} value={style.positionY} onChange={e=>set({positionY:Number(e.target.value)})}/>
+        <div className="pos-hints"><span>Top</span><span>Bottom</span></div>
+      </div>
+
+      {/* Text color */}
+      <div className="style-field">
+        <label>Text color</label>
+        <div className="color-row">
+          <input type="color" value={style.primaryColor} onChange={e=>set({primaryColor:e.target.value})}/>
+          <span className="color-val">{style.primaryColor}</span>
+          <div className="color-presets">
+            {["#FFFFFF","#FFFF00","#00FFFF","#FF4500","#FF6B6B","#000000"].map(c=>(
+              <button key={c} className={`color-dot ${style.primaryColor===c?"active":""}`} style={{background:c,border:c==="#FFFFFF"||c==="#FFFF00"?"1px solid #555":"none"}} onClick={()=>set({primaryColor:c})}/>
             ))}
           </div>
         </div>
-        <div className="style-field">
-          <label>Text color</label>
-          <div className="color-row">
-            <input type="color" value={style.primaryColor} onChange={e=>set({primaryColor:e.target.value})}/>
-            <span className="color-val">{style.primaryColor}</span>
-            <div className="color-presets">
-              {["#FFFFFF","#FFFF00","#00FFFF","#FF6B6B","#000000"].map(c=>(
-                <button key={c} className={`color-dot ${style.primaryColor===c?"active":""}`} style={{background:c,border:c==="#FFFFFF"?"1px solid #555":"none"}} onClick={()=>set({primaryColor:c})}/>
-              ))}
-            </div>
+      </div>
+
+      {/* Outline color */}
+      <div className="style-field">
+        <label>Outline color</label>
+        <div className="color-row">
+          <input type="color" value={style.outlineColor} onChange={e=>set({outlineColor:e.target.value})}/>
+          <span className="color-val">{style.outlineColor}</span>
+          <div className="color-presets">
+            {["#000000","#FFFFFF","#0000FF","#FFD700","#FF4500"].map(c=>(
+              <button key={c} className={`color-dot ${style.outlineColor===c?"active":""}`} style={{background:c,border:c==="#FFFFFF"?"1px solid #555":"none"}} onClick={()=>set({outlineColor:c})}/>
+            ))}
           </div>
         </div>
-        <div className="style-field">
-          <label>Outline color</label>
-          <div className="color-row">
-            <input type="color" value={style.outlineColor} onChange={e=>set({outlineColor:e.target.value})}/>
-            <span className="color-val">{style.outlineColor}</span>
-            <div className="color-presets">
-              {["#000000","#FFFFFF","#1a1a2e","#2d1b69","#FF6B6B"].map(c=>(
-                <button key={c} className={`color-dot ${style.outlineColor===c?"active":""}`} style={{background:c,border:c==="#FFFFFF"?"1px solid #555":"none"}} onClick={()=>set({outlineColor:c})}/>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="style-field">
-          <label>Background <span className="style-val">{style.bgOpacity===0?"off":`${Math.round(style.bgOpacity*100)}%`}</span></label>
-          <input type="range" min={0} max={1} step={0.1} value={style.bgOpacity} onChange={e=>set({bgOpacity:Number(e.target.value)})}/>
-        </div>
+      </div>
+
+      {/* Background */}
+      <div className="style-field">
+        <label>Background <span className="style-val">{style.bgOpacity===0?"off":`${Math.round(style.bgOpacity*100)}%`}</span></label>
+        <input type="range" min={0} max={1} step={0.05} value={style.bgOpacity} onChange={e=>set({bgOpacity:Number(e.target.value)})}/>
       </div>
     </div>
   );
 }
 
+// ─── Subtitle overlay style helper ───────────────────────────────────────────
+function subTextStyle(style:SubStyle, scale=1): React.CSSProperties {
+  return {
+    fontFamily: style.fontName,
+    fontSize: Math.round(style.fontSize * scale) + "px",
+    color: style.primaryColor,
+    background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+    padding: style.bgOpacity > 0 ? `${3*scale}px ${10*scale}px` : "0",
+    borderRadius: style.bgOpacity > 0 ? "4px" : "0",
+    textShadow: style.bgOpacity === 0
+      ? `${scale}px ${scale}px ${3*scale}px ${style.outlineColor},-${scale}px -${scale}px ${3*scale}px ${style.outlineColor},${scale}px -${scale}px ${3*scale}px ${style.outlineColor},-${scale}px ${scale}px ${3*scale}px ${style.outlineColor}`
+      : "none",
+    lineHeight: 1.3,
+    textAlign: "center" as const,
+    maxWidth: "88%",
+    wordBreak: "break-word" as const,
+    whiteSpace: "pre-wrap" as const,
+    display: "inline-block",
+  };
+}
+
 // ─── Subtitle Editor ──────────────────────────────────────────────────────────
-function SubtitleEditor({subtitles,onChange,currentTime}:{subtitles:Subtitle[];onChange:(s:Subtitle[])=>void;currentTime?:number}){
+function SubtitleEditor({subtitles,onChange,currentTime}:{subtitles:Subtitle[];onChange:(s:Subtitle[])=>void;currentTime:number}){
   const listRef=useRef<HTMLDivElement>(null);
-  const activeIdx=subtitles.findIndex(s=>currentTime!==undefined&&currentTime>=s.start&&currentTime<=s.end);
+  const activeIdx=subtitles.findIndex(s=>currentTime>=s.start&&currentTime<=s.end);
 
   useEffect(()=>{
     if(activeIdx>=0&&listRef.current){
@@ -259,6 +286,7 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];vi
 export default function App(){
   const [step,setStep]=useState<Step>("upload");
   const [videoFile,setVideoFile]=useState<File|null>(null);
+  const [videoUrl,setVideoUrl]=useState<string>("");
   const [targetLang,setTargetLang]=useState("original");
   const [subtitles,setSubtitles]=useState<Subtitle[]>([]);
   const [style,setStyle]=useState<SubStyle>(DEFAULT_STYLE);
@@ -266,7 +294,11 @@ export default function App(){
   const [currentTime,setCurrentTime]=useState(0);
   const videoRef=useRef<HTMLVideoElement>(null);
 
-  const handleFile=useCallback((f:File)=>{setVideoFile(f);setError(null);},[]);
+  const handleFile=useCallback((f:File)=>{
+    setVideoFile(f);
+    setVideoUrl(URL.createObjectURL(f));
+    setError(null);
+  },[]);
 
   const startTranscription=async()=>{
     if(!videoFile)return;
@@ -283,8 +315,8 @@ export default function App(){
     }catch(e:any){setError(e.message??"Unknown error.");setStep("upload");}
   };
 
-  const stepIndex=["upload","processing","edit","export"].indexOf(step);
   const currentSub=subtitles.find(s=>currentTime>=s.start&&currentTime<=s.end);
+  const stepIndex=["upload","processing","edit","export"].indexOf(step);
 
   return(
     <>
@@ -303,6 +335,7 @@ export default function App(){
         </header>
 
         <main className="main">
+
           {step==="upload"&&(
             <div className="panel fade-in">
               <div className="panel-hero">
@@ -316,7 +349,7 @@ export default function App(){
                   <div className="file-info">
                     <svg className="file-icon" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M10 9L15 12L10 15V9Z" fill="currentColor"/></svg>
                     <div><p className="file-name">{videoFile.name}</p><p className="file-meta">{formatSize(videoFile.size)}</p></div>
-                    <button className="clear-btn" onClick={()=>setVideoFile(null)}>×</button>
+                    <button className="clear-btn" onClick={()=>{setVideoFile(null);setVideoUrl("");}}>×</button>
                   </div>
                   <div className="lang-selector">
                     <label>Translate to</label>
@@ -340,7 +373,7 @@ export default function App(){
           {step==="edit"&&(
             <div className="panel full fade-in">
               <div className="edit-header">
-                <div><h2>Review subtitles</h2><p className="edit-sub">Play the video and edit in sync</p></div>
+                <div><h2>Review subtitles</h2><p className="edit-sub">Play video, adjust style and position</p></div>
                 <div className="edit-actions">
                   <button className="btn-outline" onClick={()=>setStep("upload")}>← New video</button>
                   <button className="btn-primary" onClick={()=>setStep("export")}>Export →</button>
@@ -349,40 +382,18 @@ export default function App(){
               <div className="edit-layout">
                 {/* Left: video + style */}
                 <div className="edit-left">
-                  {videoFile&&(
-                    <div className="video-player">
-                      <video
-                        ref={videoRef}
-                        src={URL.createObjectURL(videoFile)}
-                        controls
-                        className="video-el"
-                        onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-                      />
-                      {currentSub&&(
-                        <div className="sub-overlay" style={
-                          style.position==="bottom"?{bottom:48,top:"auto"}:
-                          style.position==="top"?{top:8,bottom:"auto"}:
-                          {top:"50%",bottom:"auto",transform:"translateY(-50%)"}
-                        }>
-                          <span className="sub-overlay-text" style={{
-                            fontFamily:style.fontName,
-                            fontSize:Math.max(10,style.fontSize*0.5)+"px",
-                            maxWidth:"90%",
-                            wordBreak:"break-word",
-                            whiteSpace:"pre-wrap",
-                            color:style.primaryColor,
-                            background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
-                            padding:style.bgOpacity>0?"3px 10px":"0",
-                            borderRadius:style.bgOpacity>0?"4px":"0",
-                            textShadow:style.bgOpacity===0?`1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`:"none",
-                          }}>{currentSub.text}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="video-wrap">
+                    <video ref={videoRef} src={videoUrl} controls className="video-el"
+                      onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}/>
+                    {currentSub&&(
+                      <div className="sub-overlay" style={{top:`${style.positionY}%`,transform:"translateY(-50%)"}}>
+                        <span style={subTextStyle(style,0.55)}>{currentSub.text}</span>
+                      </div>
+                    )}
+                  </div>
                   <StylePanel style={style} onChange={setStyle}/>
                 </div>
-                {/* Right: subtitle list */}
+                {/* Right: editor */}
                 <div className="edit-right">
                   <SubtitleEditor subtitles={subtitles} onChange={setSubtitles} currentTime={currentTime}/>
                 </div>
@@ -446,7 +457,7 @@ const CSS = `
   .clear-btn{margin-left:auto;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .2s}
   .clear-btn:hover{color:var(--red)}
   .lang-selector{display:flex;flex-direction:column;gap:6px}
-  .lang-selector label,.style-field label{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:.05em;text-transform:uppercase;display:flex;justify-content:space-between}
+  .lang-selector label,.style-field label{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:.05em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
   .lang-selector select,.style-panel select{background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;padding:9px 12px;cursor:pointer;outline:none;transition:border-color .2s;width:100%}
   .lang-selector select:focus,.style-panel select:focus{border-color:var(--amber)}
   .processing-view{text-align:center;padding:60px 32px;display:flex;flex-direction:column;align-items:center;gap:18px}
@@ -465,42 +476,42 @@ const CSS = `
   .edit-sub{color:var(--muted);font-size:13px;margin-top:3px}
   .edit-actions{display:flex;gap:8px}
   .edit-actions .btn-primary{width:auto}
-  .edit-layout{display:grid;grid-template-columns:420px 1fr;gap:20px;align-items:start}
-  .edit-left{display:flex;flex-direction:column;gap:16px;position:sticky;top:74px}
+  .edit-layout{display:grid;grid-template-columns:360px 1fr;gap:20px;align-items:start}
+  .edit-left{display:flex;flex-direction:column;gap:14px;position:sticky;top:72px}
   .edit-right{min-width:0}
-  .video-player{position:relative;background:#000;border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:9/16;max-height:420px;width:auto;margin:0 auto}
-  .video-el{width:100%;height:100%;display:block;object-fit:contain}
+  .video-wrap{position:relative;background:#000;border-radius:var(--radius-lg);overflow:hidden;width:100%}
+  .video-el{width:100%;display:block;max-height:420px;object-fit:contain}
   .sub-overlay{position:absolute;left:0;right:0;display:flex;justify-content:center;padding:0 12px;pointer-events:none;z-index:10}
-  .sub-overlay-text{display:inline-block;line-height:1.3;text-align:center;max-width:88%;word-break:break-word;white-space:pre-wrap;overflow-wrap:break-word;}
-  .style-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;display:flex;flex-direction:column;gap:14px}
+  .style-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:12px}
   .style-panel-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-  .style-grid{display:flex;flex-direction:column;gap:12px}
-  .style-field{display:flex;flex-direction:column;gap:6px}
+  .style-grid{display:flex;flex-direction:column;gap:11px}
+  .style-field{display:flex;flex-direction:column;gap:5px}
   .style-val{color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:11px}
   .style-field input[type=range]{width:100%;accent-color:var(--amber);cursor:pointer}
-  .pos-group{display:flex;gap:5px}
-  .pos-btn{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--muted);font-size:11px;padding:6px 3px;cursor:pointer;transition:all .2s;text-align:center}
-  .pos-btn.active{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .pos-hints{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:2px}
+  .preset-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+  .preset-btn{background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--muted);font-size:10px;padding:5px 3px;cursor:pointer;transition:all .2s;text-align:center;line-height:1.3}
+  .preset-btn.active{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
   .color-row{display:flex;align-items:center;gap:8px}
-  .color-row input[type=color]{width:30px;height:30px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px}
+  .color-row input[type=color]{width:28px;height:28px;border:none;background:none;cursor:pointer;padding:0;border-radius:5px}
   .color-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)}
-  .color-presets{display:flex;gap:5px;margin-left:auto}
-  .color-dot{width:18px;height:18px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
+  .color-presets{display:flex;gap:4px;margin-left:auto}
+  .color-dot{width:17px;height:17px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
   .color-dot.active{border-color:var(--amber);transform:scale(1.2)}
   .subtitle-editor{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
   .editor-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
   .editor-header h3{font-family:'Syne',sans-serif;font-weight:700;font-size:14px}
   .count-badge{font-size:11px;font-family:'JetBrains Mono',monospace;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:3px 10px;color:var(--muted)}
-  .subtitle-list{max-height:calc(100vh - 220px);overflow-y:auto}
+  .subtitle-list{max-height:calc(100vh - 200px);overflow-y:auto}
   .subtitle-list::-webkit-scrollbar{width:4px}
   .subtitle-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-  .subtitle-item{display:grid;grid-template-columns:32px 1fr auto;grid-template-rows:auto auto;gap:5px 10px;padding:12px 14px;border-bottom:1px solid var(--border);transition:background .15s}
+  .subtitle-item{display:grid;grid-template-columns:30px 1fr auto;grid-template-rows:auto auto;gap:5px 10px;padding:11px 13px;border-bottom:1px solid var(--border);transition:background .15s}
   .subtitle-item:last-child{border-bottom:none}
   .subtitle-item:hover{background:rgba(255,255,255,0.02)}
   .subtitle-item.highlighted{background:var(--amber-dim);border-left:2px solid var(--amber)}
   .sub-index{grid-row:1/3;align-self:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);text-align:center}
-  .sub-timecodes{display:flex;align-items:center;gap:6px}
-  .timecode-input{background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 7px;width:105px;outline:none;transition:border-color .2s}
+  .sub-timecodes{display:flex;align-items:center;gap:5px}
+  .timecode-input{background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 6px;width:100px;outline:none;transition:border-color .2s}
   .timecode-input:focus{border-color:var(--amber)}
   .timecode-arrow{color:var(--muted);font-size:11px}
   .sub-text{background:transparent;border:none;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;resize:none;outline:none;width:100%;line-height:1.5;padding:0}
