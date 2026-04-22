@@ -58,9 +58,21 @@ function toTimecode(s:number){
 function formatSize(b:number){return b<1024*1024?`${(b/1024).toFixed(1)} KB`:`${(b/(1024*1024)).toFixed(1)} MB`;}
 
 // ─── Draggable+Resizable Subtitle Box on Video ────────────────────────────────
-function SubtitleBox({text, style, onChange}:{text:string; style:SubStyle; onChange:(s:SubStyle)=>void}){
+function SubtitleBox({text, style, onChange, active}:{text:string; style:SubStyle; onChange:(s:SubStyle)=>void; active:boolean}){
+  const [selected, setSelected] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const action = useRef<{type:string;startX:number;startY:number;startBox:SubBox}|null>(null);
+
+  // Deselect on click outside
+  useEffect(()=>{
+    const handler = (e:MouseEvent) => {
+      if(containerRef.current && !containerRef.current.contains(e.target as Node)){
+        setSelected(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  },[]);
 
   const getParentSize = () => {
     const p = containerRef.current?.parentElement;
@@ -112,14 +124,15 @@ function SubtitleBox({text, style, onChange}:{text:string; style:SubStyle; onCha
         position:"absolute",
         left:`${style.box.x}%`, top:`${style.box.y}%`,
         width:`${style.box.w}%`, height:`${style.box.h}%`,
-        border:"1.5px dashed rgba(255,255,255,0.6)",
+        border: selected ? "2px solid #f59e0b" : "1.5px dashed rgba(255,255,255,0.5)",
         borderRadius:4, zIndex:20, cursor:"move",
-        background:"rgba(255,255,255,0.04)",
+        background: selected ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.03)",
         display:"flex", alignItems:"center", justifyContent:"center",
         overflow:"visible",
-        boxShadow:"0 0 0 1px rgba(0,0,0,0.5)",
+        boxShadow: selected ? "0 0 0 1px rgba(245,158,11,0.3)" : "0 0 0 1px rgba(0,0,0,0.4)",
+        transition:"border-color .15s, background .15s",
       }}
-      onPointerDown={e=>onPointerDown(e,"move")}
+      onPointerDown={e=>{setSelected(true);onPointerDown(e,"move");}}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
@@ -136,8 +149,8 @@ function SubtitleBox({text, style, onChange}:{text:string; style:SubStyle; onCha
         display:"inline-block",
       }}>{text||"Sample text"}</span>
 
-      {/* Resize handles */}
-      {[
+      {/* Resize handles - only when selected */}
+      {selected && [
         {key:"nw",style:{top:-5,left:-5,cursor:"nw-resize"}},
         {key:"ne",style:{top:-5,right:-5,cursor:"ne-resize"}},
         {key:"sw",style:{bottom:-5,left:-5,cursor:"sw-resize"}},
@@ -150,7 +163,7 @@ function SubtitleBox({text, style, onChange}:{text:string; style:SubStyle; onCha
         <div key={h.key}
           style={{
             position:"absolute", width:10, height:10,
-            background:"#fff", border:"1.5px solid #f59e0b",
+            background:"#f59e0b", border:"1.5px solid #fff",
             borderRadius:2, zIndex:30, ...h.style as any,
           }}
           onPointerDown={e=>onPointerDown(e,h.key)}
@@ -158,6 +171,12 @@ function SubtitleBox({text, style, onChange}:{text:string; style:SubStyle; onCha
           onPointerUp={onPointerUp}
         />
       ))}
+      {/* Deselect hint */}
+      {selected && (
+        <div style={{position:"absolute",top:-22,right:0,fontSize:10,color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap",pointerEvents:"none",background:"rgba(0,0,0,0.5)",padding:"2px 5px",borderRadius:3}}>
+          click outside to deselect
+        </div>
+      )}
     </div>
   );
 }
@@ -479,9 +498,10 @@ export default function App(){
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}/>
                   {/* Subtitle box overlay */}
                   <SubtitleBox
-                    text={currentSub?.text??""}
+                    text={currentSub?.text??"Sample subtitle text"}
                     style={style}
                     onChange={setStyle}
+                    active={!!currentSub}
                   />
                 </div>
                 <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
