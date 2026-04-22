@@ -145,7 +145,7 @@ async function startServer() {
           messages: [
             {
               role: "system",
-              content: `You are a professional subtitle translator. Translate each subtitle line to ${targetLang}. Preserve line breaks. Return ONLY a JSON array of translated strings, same order and count as input. No explanation.`,
+              content: `You are a professional subtitle translator. Your task is to translate subtitle lines into ${targetLang}. Rules: 1) Return ONLY a valid JSON array of strings. 2) Same number of items as input. 3) Each item is the translation of the corresponding input. 4) No explanations, no markdown, no extra text. 5) Translate everything to ${targetLang} even if the source is already in ${targetLang}.`,
             },
             {
               role: "user",
