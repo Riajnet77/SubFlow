@@ -135,36 +135,45 @@ async function startServer() {
         return splitSeg(seg, conf);
       });
 
-      // 4. Optional: translate to target language using Groq LLM (free)
+      // 4. Optional: translate to target language using Groq LLM (batched)
       if (targetLang && targetLang.toLowerCase() !== "original" && subtitles.length > 0) {
-        console.log(`[transcribe] Translating to ${targetLang}…`);
-        const texts = subtitles.map((s) => s.text);
+        console.log(`[transcribe] Translating ${subtitles.length} lines to ${targetLang}…`);
 
-        const chatResponse = await groq.chat.completions.create({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "system",
-              content: `You are a professional subtitle translator. Your task is to translate subtitle lines into ${targetLang}. Rules: 1) Return ONLY a valid JSON array of strings. 2) Same number of items as input. 3) Each item is the translation of the corresponding input. 4) No explanations, no markdown, no extra text. 5) Translate everything to ${targetLang} even if the source is already in ${targetLang}.`,
-            },
-            {
-              role: "user",
-              content: JSON.stringify(texts),
-            },
-          ],
-          temperature: 0.2,
-          max_tokens: 4096,
-        });
+        const BATCH = 40;
+        const allTexts = subtitles.map(s => s.text);
+        const translated: string[] = [];
 
-        try {
-          const raw = chatResponse.choices[0].message.content ?? "[]";
-          const cleaned = raw.replace(/```json|```/g, "").trim();
-          const translated: string[] = JSON.parse(cleaned);
-          if (Array.isArray(translated) && translated.length === subtitles.length) {
-            subtitles = subtitles.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
+        for (let i = 0; i < allTexts.length; i += BATCH) {
+          const batch = allTexts.slice(i, i + BATCH);
+          try {
+            const chatResponse = await groq.chat.completions.create({
+              model: "llama-3.3-70b-versatile",
+              messages: [
+                {
+                  role: "system",
+                  content: `Translate the following subtitle lines to ${targetLang}. Return ONLY a JSON array of strings with the same count as the input. No markdown, no explanations, just the JSON array.`,
+                },
+                { role: "user", content: JSON.stringify(batch) },
+              ],
+              temperature: 0.1,
+              max_tokens: 2048,
+            });
+            const raw = chatResponse.choices[0].message.content ?? "[]";
+            const cleaned = raw.replace(/```json|```/g, "").trim();
+            const result: string[] = JSON.parse(cleaned);
+            if (Array.isArray(result) && result.length === batch.length) {
+              translated.push(...result);
+            } else {
+              translated.push(...batch); // fallback: keep original
+            }
+          } catch (e) {
+            console.warn(`[transcribe] Batch ${i} translation failed, keeping originals.`);
+            translated.push(...batch);
           }
-        } catch (e) {
-          console.warn("[transcribe] Translation parse failed, keeping original text.");
+        }
+
+        if (translated.length === subtitles.length) {
+          subtitles = subtitles.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
         }
       }
 
@@ -203,27 +212,48 @@ async function startServer() {
 
       // Parse style options
       const style = req.body.style ? JSON.parse(req.body.style) : {};
-      const fontSize    = style.fontSize    ?? 18;
-      const fontName    = style.fontName    ?? "Arial";
-      const position    = style.position    ?? "bottom"; // bottom | top | middle
+      const fontSize     = style.fontSize     ?? 18;
+      const fontName     = style.fontName     ?? "Arial";
       const primaryColor = style.primaryColor ?? "#FFFFFF";
       const outlineColor = style.outlineColor ?? "#000000";
-      const bgOpacity   = style.bgOpacity   ?? 0;   // 0 = no bg box, 1 = full black box
+      const bgOpacity    = style.bgOpacity    ?? 0;
 
-      // Convert hex color to ASS BGR format (&HAABBGGRR)
+      // Convert hex color to ASS BGR format (&H00BBGGRR)
       const hexToAss = (hex: string) => {
-        const h = hex.replace("#", "");
+        const h = hex.replace("#", "").padEnd(6, "0");
         const r = h.slice(0,2); const g = h.slice(2,4); const b = h.slice(4,6);
         return `&H00${b}${g}${r}`.toUpperCase();
       };
 
-      // Vertical alignment: 2=bottom, 8=top, 5=middle
-      // positionY: 0=top, 100=bottom → ASS alignment + MarginV
-      const posY = style.positionY ?? 85;
-      const alignment = posY < 33 ? 8 : posY < 66 ? 5 : 2;
-      const marginV = alignment === 8 ? Math.round(posY * 3) : alignment === 2 ? Math.round((100 - posY) * 3) : 0;
+      // Use box coordinates {x, y, w, h} as % of video dimensions
+      // ASS PlayRes defaults: 384x288 — we use 1000x1000 for % math simplicity
+      const box = style.box ?? { x: 5, y: 75, w: 90, h: 18 };
+      const centerY = box.y + box.h / 2; // % from top
 
-      // BackColour opacity: &HAA000000 where AA=00 is opaque, FF is transparent
+      // Alignment: 7=top-left 8=top-center 9=top-right
+      //            4=mid-left  5=mid-center  6=mid-right
+      //            1=bot-left  2=bot-center  3=bot-right
+      // We always use center-aligned horizontally
+      let alignment = 2; // bottom-center default
+      let marginV = 0;
+      const playH = 288; // ASS default play res height
+      const playW = 384; // ASS default play res width
+
+      if (centerY < 40) {
+        alignment = 8; // top-center
+        marginV = Math.round((box.y / 100) * playH);
+      } else if (centerY > 60) {
+        alignment = 2; // bottom-center
+        marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
+      } else {
+        alignment = 5; // middle-center
+        marginV = 0;
+      }
+
+      const marginL = Math.round((box.x / 100) * playW);
+      const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
+
+      // BackColour opacity
       const bgAlpha = Math.round((1 - bgOpacity) * 255).toString(16).padStart(2, "0").toUpperCase();
       const backColour = `&H${bgAlpha}000000`;
 
@@ -237,8 +267,10 @@ async function startServer() {
         `Outline=${bgOpacity > 0 ? 0 : 2}`,
         `Shadow=0`,
         `Alignment=${alignment}`,
-        `MarginV=${marginV}`,
-        `Bold=0`,
+        `MarginV=${Math.max(0, marginV)}`,
+        `MarginL=${Math.max(0, marginL)}`,
+        `MarginR=${Math.max(0, marginR)}`,
+        `WrapStyle=1`,
       ].join(",");
 
       const escapedSrt = srtPath.replace(/\\/g, "/").replace(/:/g, "\\:");
