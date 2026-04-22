@@ -468,9 +468,9 @@ const CSS = `
   .edit-layout{display:grid;grid-template-columns:420px 1fr;gap:20px;align-items:start}
   .edit-left{display:flex;flex-direction:column;gap:16px;position:sticky;top:74px}
   .edit-right{min-width:0}
-  .video-player{position:relative;background:#000;border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:16/9}
+  .video-player{position:relative;background:#000;border-radius:var(--radius-lg);overflow:hidden;aspect-ratio:9/16}
   .video-el{width:100%;height:100%;display:block;object-fit:contain}
-  .sub-overlay{position:absolute;left:0;right:0;display:flex;justify-content:center;padding:0 16px;pointer-events:none}
+  .sub-overlay{position:absolute;left:0;right:0;display:flex;justify-content:center;padding:0 12px;pointer-events:none;z-index:10}
   .sub-overlay-text{display:inline-block;line-height:1.3;text-align:center;max-width:88%;word-break:break-word;white-space:pre-wrap;overflow-wrap:break-word;}
   .style-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;display:flex;flex-direction:column;gap:14px}
   .style-panel-title{font-family:'Syne',sans-serif;font-weight:700;font-size:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
