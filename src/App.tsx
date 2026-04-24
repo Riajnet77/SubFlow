@@ -137,7 +137,7 @@ function SubtitleBox({text,style,onChange}:{text:string;style:SubStyle;onChange:
         borderRadius:4,zIndex:20,cursor:"move",
         background:sel?"rgba(245,158,11,0.05)":"transparent",
         display:"flex",alignItems:"center",justifyContent:"center",
-        overflow:"hidden",boxSizing:"border-box",
+        overflow:"visible",boxSizing:"border-box",
       }}
       onPointerDown={e=>pd(e,"move")}
       onPointerMove={pm}
@@ -455,14 +455,16 @@ export default function App(){
             <div className="editor-page fade-in">
               {/* Video column */}
               <div className="vid-col">
-                <div className="vid-wrap">
+                <div className="vid-wrap" id="vid-wrap">
                   <video src={videoUrl} controls className="vid-el"
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}/>
-                  <SubtitleBox
-                    text={currentSub?.text??"Sample subtitle text"}
-                    style={style}
-                    onChange={setStyle}
-                  />
+                  <div className="sub-overlay-layer">
+                    <SubtitleBox
+                      text={currentSub?.text??"Sample subtitle text"}
+                      style={style}
+                      onChange={setStyle}
+                    />
+                  </div>
                 </div>
                 <p className="drag-hint">⠿ Drag to move · drag corners/edges to resize</p>
               </div>
@@ -549,6 +551,8 @@ const CSS=`
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
   .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;background:var(--bg);gap:6px}
   .vid-wrap{position:relative;width:100%;max-width:560px;background:#000;border-radius:12px;overflow:hidden}
+  .sub-overlay-layer{position:absolute;inset:0;pointer-events:none}
+  .sub-overlay-layer>*{pointer-events:all}
   .vid-el{width:100%;display:block;max-height:calc(100vh - 110px);object-fit:contain}
   .drag-hint{font-size:11px;color:var(--mut)}
   /* Right panel */
@@ -564,10 +568,8 @@ const CSS=`
   .sec-label{font-size:10px;color:var(--mut);font-weight:500;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
   .sec-label.mt8{margin-top:4px}
   .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:10px}
-  .presets-scroll{display:flex;gap:5px;overflow-x:auto;padding-bottom:3px}
-  .presets-scroll::-webkit-scrollbar{height:3px}
-  .presets-scroll::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
-  .preset-pill{flex-shrink:0;background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:11px;padding:4px 10px;cursor:pointer;transition:all .2s;white-space:nowrap}
+  .presets-scroll{display:flex;flex-wrap:wrap;gap:5px;padding-bottom:2px}
+  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:11px;padding:4px 10px;cursor:pointer;transition:all .2s;white-space:nowrap}
   .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .divider{height:1px;background:var(--brd);margin:4px 0}
   .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:12px;padding:7px 9px;cursor:pointer;outline:none;width:100%}
