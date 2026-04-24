@@ -11,11 +11,12 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import Groq from "groq-sdk";
+import os from "os";
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
-const UPLOAD_DIR = "/tmp/subflow_uploads";
-const WORK_DIR = "/tmp/subflow_work";
+const UPLOAD_DIR = path.join(os.tmpdir(), "subflow_uploads");
+const WORK_DIR   = path.join(os.tmpdir(), "subflow_work");
 [UPLOAD_DIR, WORK_DIR].forEach(dir => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); });
 
 const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 500 * 1024 * 1024 } });
@@ -63,6 +64,7 @@ async function startServer() {
 
       const targetLang: string = (req.body.targetLang ?? "").trim();
       const groqApiKey = process.env.GROQ_API_KEY;
+      console.log(`[transcribe] targetLang received: "${targetLang}"`);
       if (!groqApiKey) { res.status(500).json({ error: "GROQ_API_KEY is not configured on the server." }); return; }
 
       const groq = new Groq({ apiKey: groqApiKey });
@@ -249,13 +251,16 @@ Style: Default,${fontName},${fontSize},${hexToAss(primaryColor)},${hexToAss(prim
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 `;
       const assEvents = subtitles.map((s:any) =>
-        `Dialogue: 0,${assToTime(s.start)},${assToTime(s.end)},Default,,0,0,0,,${String(s.text).replace(/\n/g,"\N").trim()}`
+        `Dialogue: 0,${assToTime(s.start)},${assToTime(s.end)},Default,,0,0,0,,${String(s.text).replace(/\n/g,"\\N").trim()}`
       ).join("\n");
 
       fs.writeFileSync(assPath, assHeader + assEvents, "utf8");
 
       // 6. Burn with ffmpeg using ASS filter (pixel-accurate)
-      const escapedAss = assPath.replace(/\\/g,"/").replace(/:/g,"\:");
+      // Windows-safe path escaping for ffmpeg ass filter
+      const escapedAss = assPath
+        .replace(/\\/g, "/")           // backslashes → forward slashes
+        .replace(/^([A-Za-z]):/, "$1\\:"); // C: → C\: (escape drive letter colon)
       console.log(`[render] Burning subtitles: align=${alignment} marginV=${marginV} marginL=${marginL} marginR=${marginR}`);
 
       await new Promise<void>((resolve, reject) => {
