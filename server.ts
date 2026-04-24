@@ -120,33 +120,68 @@ async function startServer() {
 
       if(targetLang!=="original"&&langName&&subtitles.length>0){
         console.log("[translate] "+subtitles.length+" lines → "+langName);
-        const BATCH=30; const allTexts=subtitles.map(s=>s.text); const translated:string[]=[];
+
+        // Robust JSON extraction — handles markdown fences and extra text
+        function extractJsonArray(raw:string): string[]|null {
+          const clean = raw.replace(/```json|```/g,"").trim();
+          // Try direct parse first
+          try { const r=JSON.parse(clean); if(Array.isArray(r))return r; } catch{}
+          // Try extracting [...] from anywhere in the text
+          const m = clean.match(/\[[\s\S]*\]/);
+          if(m){ try { const r=JSON.parse(m[0]); if(Array.isArray(r))return r; } catch{} }
+          return null;
+        }
+
+        // Translate a single line as fallback
+        async function translateOne(text:string): Promise<string> {
+          try {
+            const r = await groq.chat.completions.create({
+              model:"llama-3.3-70b-versatile", temperature:0.1, max_tokens:256,
+              messages:[
+                {role:"system", content:"Translate this subtitle to "+langName+". Reply with only the translation, nothing else."},
+                {role:"user", content:text},
+              ],
+            });
+            return (r.choices[0].message.content??"").trim() || text;
+          } catch { return text; }
+        }
+
+        const BATCH=20; const allTexts=subtitles.map(s=>s.text); const translated:string[]=[];
         for(let i=0;i<allTexts.length;i+=BATCH){
           const batch=allTexts.slice(i,i+BATCH);
+          let success=false;
           try{
             const resp=await groq.chat.completions.create({
               model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:2048,
               messages:[
-                {role:"system",content:"Translate each subtitle line to "+langName+". Return ONLY a JSON array of strings. Same count as input. No markdown."},
+                {role:"system",content:"You are a subtitle translator. Translate each of the following lines to "+langName+". Return ONLY a valid JSON array of translated strings. Same number of items as input. No explanations, no markdown fences."},
                 {role:"user",content:JSON.stringify(batch)},
               ],
             });
-            const raw=(resp.choices[0].message.content??"[]").replace(/```json|```/g,"").trim();
-            const result:string[]=JSON.parse(raw);
-            if(Array.isArray(result)&&result.length===batch.length){
+            const raw=resp.choices[0].message.content??"";
+            console.log("[translate] raw response (first 200): "+raw.slice(0,200));
+            const result=extractJsonArray(raw);
+            if(result&&result.length===batch.length){
               translated.push(...result);
-              console.log("[translate] batch "+(Math.floor(i/BATCH)+1)+" OK");
+              console.log("[translate] batch "+(Math.floor(i/BATCH)+1)+" OK ("+result.length+" lines)");
+              success=true;
             }else{
-              console.warn("[translate] mismatch, keeping originals");
-              translated.push(...batch);
+              console.warn("[translate] batch parse failed, result="+JSON.stringify(result?.slice(0,3))+" batchLen="+batch.length);
             }
           }catch(e:any){
-            console.error("[translate] error: "+e?.message);
-            translated.push(...batch);
+            console.error("[translate] batch error: "+e?.message);
+          }
+          // Fallback: translate line by line
+          if(!success){
+            console.log("[translate] falling back to line-by-line for batch "+(Math.floor(i/BATCH)+1));
+            for(const text of batch){
+              translated.push(await translateOne(text));
+            }
           }
         }
         if(translated.length===subtitles.length){
           subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
+          console.log("[translate] Done. Sample: "+translated[0]);
         }
       }
 
