@@ -10,104 +10,65 @@ interface SubStyle {
 type Step = "upload"|"processing"|"edit"|"export";
 
 const LANGUAGES = [
-  {code:"original", label:"Original (no translation)"},
-  {code:"en",  label:"English"},
-  {code:"pt",  label:"Portuguese"},
-  {code:"es",  label:"Spanish"},
-  {code:"fr",  label:"French"},
-  {code:"de",  label:"German"},
-  {code:"it",  label:"Italian"},
-  {code:"ja",  label:"Japanese"},
-  {code:"ko",  label:"Korean"},
-  {code:"zh",  label:"Chinese"},
-  {code:"ru",  label:"Russian"},
-  {code:"ar",  label:"Arabic"},
-  {code:"hi",  label:"Hindi"},
+  {code:"original",label:"Original (no translation)"},
+  {code:"en",label:"English"},{code:"pt",label:"Portuguese"},
+  {code:"es",label:"Spanish"},{code:"fr",label:"French"},
+  {code:"de",label:"German"},{code:"it",label:"Italian"},
+  {code:"ja",label:"Japanese"},{code:"ko",label:"Korean"},
+  {code:"zh",label:"Chinese"},{code:"ru",label:"Russian"},
+  {code:"ar",label:"Arabic"},{code:"hi",label:"Hindi"},
 ];
-
-const LANG_NAMES: Record<string,string> = {
-  en:"English", pt:"Portuguese", es:"Spanish", fr:"French",
-  de:"German", it:"Italian", ja:"Japanese", ko:"Korean",
-  zh:"Chinese", ru:"Russian", ar:"Arabic", hi:"Hindi",
-};
-
 const FONTS = ["Arial","Impact","Georgia","Verdana","Trebuchet MS","Tahoma","Courier New"];
-
 const PRESETS: Record<string,Partial<SubStyle>> = {
-  impact:  {fontName:"Impact",  fontSize:26, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0},
-  bold:    {fontName:"Impact",  fontSize:30, primaryColor:"#FFFF00", outlineColor:"#000000", bgOpacity:0},
-  neon:    {fontName:"Arial",   fontSize:22, primaryColor:"#00FFFF", outlineColor:"#0055FF", bgOpacity:0},
-  fire:    {fontName:"Impact",  fontSize:24, primaryColor:"#FF4500", outlineColor:"#FFD700", bgOpacity:0},
-  cinema:  {fontName:"Georgia", fontSize:18, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0.7},
-  minimal: {fontName:"Arial",   fontSize:16, primaryColor:"#FFFFFF", outlineColor:"#222222", bgOpacity:0},
-  classic: {fontName:"Arial",   fontSize:18, primaryColor:"#FFFFFF", outlineColor:"#000000", bgOpacity:0.5},
+  impact:  {fontName:"Impact", fontSize:26,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0},
+  bold:    {fontName:"Impact", fontSize:30,primaryColor:"#FFFF00",outlineColor:"#000000",bgOpacity:0},
+  neon:    {fontName:"Arial",  fontSize:22,primaryColor:"#00FFFF",outlineColor:"#0055FF",bgOpacity:0},
+  fire:    {fontName:"Impact", fontSize:24,primaryColor:"#FF4500",outlineColor:"#FFD700",bgOpacity:0},
+  cinema:  {fontName:"Georgia",fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.7},
+  minimal: {fontName:"Arial",  fontSize:16,primaryColor:"#FFFFFF",outlineColor:"#222222",bgOpacity:0},
+  classic: {fontName:"Arial",  fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.5},
 };
-
-const PRESET_LIST = [
-  {key:"impact",label:"Impact",emoji:"💥"},
-  {key:"bold",  label:"Bold",  emoji:"⚡"},
-  {key:"neon",  label:"Neon",  emoji:"🌀"},
-  {key:"fire",  label:"Fire",  emoji:"🔥"},
-  {key:"cinema",label:"Cinema",emoji:"🎬"},
-  {key:"minimal",label:"Minimal",emoji:"◻️"},
+const PRESET_LIST=[
+  {key:"impact",label:"Impact",emoji:"💥"},{key:"bold",label:"Bold",emoji:"⚡"},
+  {key:"neon",label:"Neon",emoji:"🌀"},{key:"fire",label:"Fire",emoji:"🔥"},
+  {key:"cinema",label:"Cinema",emoji:"🎬"},{key:"minimal",label:"Minimal",emoji:"◻️"},
   {key:"classic",label:"Classic",emoji:"📺"},
 ];
-
-const DEFAULT_BOX: SubBox = {x:5, y:78, w:90, h:14};
-const DEFAULT_STYLE: SubStyle = {
-  fontSize:26, fontName:"Impact",
-  primaryColor:"#FFFFFF", outlineColor:"#000000",
-  bgOpacity:0, preset:"impact", box:DEFAULT_BOX,
-};
+const DEFAULT_BOX: SubBox = {x:5,y:78,w:90,h:14};
+const DEFAULT_STYLE: SubStyle = {fontSize:26,fontName:"Impact",primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0,preset:"impact",box:DEFAULT_BOX};
 
 function toTimecode(s:number){
   const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000);
-  return`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
 }
 function formatSize(b:number){return b<1024*1024?`${(b/1024).toFixed(1)} KB`:`${(b/(1024*1024)).toFixed(1)} MB`;}
 
-// ─── Draggable+Resizable Box ──────────────────────────────────────────────────
-function SubtitleBox({text,style,onChange,videoNaturalSize}:{
-  text:string;style:SubStyle;onChange:(s:SubStyle)=>void;
-  videoNaturalSize:{w:number;h:number};
+// ─── SubtitleBox: drag + resize, font scale passed as prop ───────────────────
+function SubtitleBox({text,style,onChange,fontScale}:{
+  text:string; style:SubStyle; onChange:(s:SubStyle)=>void; fontScale:number;
 }){
   const [sel,setSel]=useState(false);
-  const [scaledFontPx,setScaledFontPx]=useState(Math.round(style.fontSize*0.5));
-  const ref=useRef<HTMLDivElement>(null);
+  const boxRef=useRef<HTMLDivElement>(null);
   const drag=useRef<{type:string;sx:number;sy:number;sb:SubBox}|null>(null);
 
   useEffect(()=>{
-    const h=(e:MouseEvent)=>{if(ref.current&&!ref.current.contains(e.target as Node))setSel(false);};
-    document.addEventListener("mousedown",h);
-    return()=>document.removeEventListener("mousedown",h);
+    const fn=(e:MouseEvent)=>{
+      if(boxRef.current&&!boxRef.current.contains(e.target as Node))setSel(false);
+    };
+    document.addEventListener("mousedown",fn);
+    return()=>document.removeEventListener("mousedown",fn);
   },[]);
 
-  // Recalculate font scale whenever style.fontSize or videoNaturalSize changes
-  useEffect(()=>{
-    const wrap=ref.current?.parentElement;
-    if(!wrap||videoNaturalSize.w===0||videoNaturalSize.h===0){
-      setScaledFontPx(Math.round(style.fontSize*0.5));
-      return;
-    }
-    const vid=wrap.querySelector("video") as HTMLVideoElement|null;
-    const cW=vid?vid.clientWidth:wrap.clientWidth;
-    const cH=vid?vid.clientHeight:wrap.clientHeight;
-    if(cW===0||cH===0){setScaledFontPx(Math.round(style.fontSize*0.5));return;}
-    const vAspect=videoNaturalSize.w/videoNaturalSize.h;
-    const cAspect=cW/cH;
-    const renderedH=vAspect>cAspect?cW/vAspect:cH;
-    const scale=renderedH/videoNaturalSize.h;
-    setScaledFontPx(Math.max(8,Math.round(style.fontSize*scale)));
-  },[style.fontSize,videoNaturalSize]);
-
-  const pSize=()=>{const p=ref.current?.parentElement;return p?{w:p.clientWidth,h:p.clientHeight}:{w:1,h:1};};
+  const parentSize=()=>{
+    const p=boxRef.current?.parentElement;
+    return p?{w:p.clientWidth,h:p.clientHeight}:{w:1,h:1};
+  };
   const clamp=(b:SubBox):SubBox=>({
     x:Math.max(0,Math.min(100-b.w,b.x)),
     y:Math.max(0,Math.min(100-b.h,b.y)),
     w:Math.max(10,Math.min(100,b.w)),
-    h:Math.max(6,Math.min(50,b.h)),
+    h:Math.max(5,Math.min(50,b.h)),
   });
-
   const pd=(e:React.PointerEvent,type:string)=>{
     e.stopPropagation();e.preventDefault();
     setSel(true);
@@ -117,9 +78,8 @@ function SubtitleBox({text,style,onChange,videoNaturalSize}:{
   const pm=(e:React.PointerEvent)=>{
     if(!drag.current)return;
     const {type,sx,sy,sb}=drag.current;
-    const {w:pw,h:ph}=pSize();
-    const dx=((e.clientX-sx)/pw)*100;
-    const dy=((e.clientY-sy)/ph)*100;
+    const {w:pw,h:ph}=parentSize();
+    const dx=((e.clientX-sx)/pw)*100, dy=((e.clientY-sy)/ph)*100;
     let nb={...sb};
     if(type==="move"){nb.x=sb.x+dx;nb.y=sb.y+dy;}
     if(type==="se"){nb.w=sb.w+dx;nb.h=sb.h+dy;}
@@ -134,66 +94,70 @@ function SubtitleBox({text,style,onChange,videoNaturalSize}:{
   };
   const pu=()=>{drag.current=null;};
 
-  // Scale font proportionally: preview rendered height / actual video height
-  const fontScale = videoNativeH > 0 && previewH > 0 ? previewH / videoNativeH : 0.5;
-  const scaledFont = Math.round(style.fontSize * fontScale);
+  const fs=Math.max(8,Math.round(style.fontSize*fontScale));
   const ts=style.bgOpacity===0
     ?`1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     :"none";
 
-  const handles=[
+  const HANDLES=[
     {k:"nw",s:{top:-5,left:-5,cursor:"nw-resize"}},
     {k:"ne",s:{top:-5,right:-5,cursor:"ne-resize"}},
     {k:"sw",s:{bottom:-5,left:-5,cursor:"sw-resize"}},
     {k:"se",s:{bottom:-5,right:-5,cursor:"se-resize"}},
-    {k:"n",s:{top:-5,left:"50%" as any,transform:"translateX(-50%)",cursor:"n-resize"}},
-    {k:"s",s:{bottom:-5,left:"50%" as any,transform:"translateX(-50%)",cursor:"s-resize"}},
-    {k:"e",s:{right:-5,top:"50%" as any,transform:"translateY(-50%)",cursor:"e-resize"}},
-    {k:"w",s:{left:-5,top:"50%" as any,transform:"translateY(-50%)",cursor:"w-resize"}},
-  ];
+    {k:"n",s:{top:-5,left:"50%",transform:"translateX(-50%)",cursor:"n-resize"}},
+    {k:"s",s:{bottom:-5,left:"50%",transform:"translateX(-50%)",cursor:"s-resize"}},
+    {k:"e",s:{right:-5,top:"50%",transform:"translateY(-50%)",cursor:"e-resize"}},
+    {k:"w",s:{left:-5,top:"50%",transform:"translateY(-50%)",cursor:"w-resize"}},
+  ] as const;
 
   return(
-    <div ref={ref}
+    <div ref={boxRef}
       style={{
         position:"absolute",
         left:`${style.box.x}%`,top:`${style.box.y}%`,
         width:`${style.box.w}%`,height:`${style.box.h}%`,
-        border:sel?"2px solid #f59e0b":"1.5px dashed rgba(255,255,255,0.45)",
+        border:sel?"2px solid #f59e0b":"1.5px dashed rgba(255,255,255,0.5)",
         borderRadius:4,zIndex:20,cursor:"move",
-        background:sel?"rgba(245,158,11,0.05)":"transparent",
+        background:sel?"rgba(245,158,11,0.06)":"transparent",
         display:"flex",alignItems:"center",justifyContent:"center",
-        overflow:"visible",boxSizing:"border-box",
+        boxSizing:"border-box",overflow:"visible",
       }}
       onPointerDown={e=>pd(e,"move")}
       onPointerMove={pm}
       onPointerUp={pu}
     >
       <span style={{
-        fontFamily:style.fontName,
-        // Scale preview font to match export: ratio of displayed container vs real video
-        fontSize:scaledFontPx+'px',
+        fontFamily:style.fontName,fontSize:fs+"px",
         color:style.primaryColor,textShadow:ts,
         background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
         padding:style.bgOpacity>0?"2px 8px":"0",
         borderRadius:style.bgOpacity>0?"3px":"0",
         textAlign:"center",lineHeight:1.2,
-        maxWidth:"98%",wordBreak:"break-word",
-        whiteSpace:"normal",display:"block",
-        pointerEvents:"none",userSelect:"none",
+        maxWidth:"98%",wordBreak:"break-word",whiteSpace:"normal",
+        display:"block",pointerEvents:"none",userSelect:"none",
       }}>{text||"Sample text"}</span>
-      {sel&&handles.map(h=>(
+
+      {sel&&HANDLES.map(h=>(
         <div key={h.k}
-          style={{position:"absolute",width:10,height:10,background:"#f59e0b",border:"1.5px solid #fff",borderRadius:2,zIndex:30,...h.s}}
+          style={{position:"absolute",width:10,height:10,background:"#f59e0b",
+            border:"1.5px solid #fff",borderRadius:2,zIndex:30,...h.s as any}}
           onPointerDown={e=>pd(e,h.k)}
           onPointerMove={pm}
           onPointerUp={pu}
         />
       ))}
-      {sel&&<div style={{position:"absolute",top:-20,right:0,fontSize:9,color:"rgba(255,255,255,0.6)",background:"rgba(0,0,0,0.6)",padding:"2px 5px",borderRadius:3,pointerEvents:"none",whiteSpace:"nowrap"}}>click outside to deselect</div>}
+      {sel&&(
+        <div style={{position:"absolute",top:-20,right:0,fontSize:9,color:"rgba(255,255,255,0.7)",
+          background:"rgba(0,0,0,0.65)",padding:"2px 5px",borderRadius:3,
+          pointerEvents:"none",whiteSpace:"nowrap"}}>
+          click outside to deselect
+        </div>
+      )}
     </div>
   );
 }
 
+// ─── Upload Zone ──────────────────────────────────────────────────────────────
 function UploadZone({onFile}:{onFile:(f:File)=>void}){
   const [drag,setDrag]=useState(false);
   const ref=useRef<HTMLInputElement>(null);
@@ -203,23 +167,34 @@ function UploadZone({onFile}:{onFile:(f:File)=>void}){
       onDragLeave={()=>setDrag(false)}
       onDrop={(e:DragEvent<HTMLDivElement>)=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(f)onFile(f);}}
       onClick={()=>ref.current?.click()}>
-      <input ref={ref} type="file" accept="video/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)onFile(f);}}/>
-      <div className="upload-icon"><svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2"/><path d="M20 20L28 24L20 28V20Z" fill="currentColor"/><path d="M4 16H44" stroke="currentColor" strokeWidth="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></div>
+      <input ref={ref} type="file" accept="video/*" style={{display:"none"}}
+        onChange={e=>{const f=e.target.files?.[0];if(f)onFile(f);}}/>
+      <div className="upload-icon">
+        <svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2"/><path d="M20 20L28 24L20 28V20Z" fill="currentColor"/><path d="M4 16H44" stroke="currentColor" strokeWidth="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
+      </div>
       <p className="upload-title">Drop your video here</p>
       <p className="upload-sub">MP4, MOV, MKV, AVI, WebM — up to 500 MB</p>
-      <button type="button" className="btn-outline" onClick={e=>{e.stopPropagation();ref.current?.click();}}>Browse files</button>
+      <button type="button" className="btn-outline"
+        onClick={e=>{e.stopPropagation();ref.current?.click();}}>Browse files</button>
     </div>
   );
 }
 
 function ProcessingView({fileName}:{fileName:string}){
   const [dots,setDots]=useState(".");
-  useEffect(()=>{const id=setInterval(()=>setDots(d=>d.length>=3?".":d+"."),600);return()=>clearInterval(id);},[]);
+  useEffect(()=>{
+    const id=setInterval(()=>setDots(d=>d.length>=3?".":d+"."),600);
+    return()=>clearInterval(id);
+  },[]);
   return(
     <div className="processing-view">
       <div className="spinner-wrap">
-        <svg viewBox="0 0 50 50" className="spinner-ring"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="94 32" strokeLinecap="round"/></svg>
-        <svg className="spinner-icon" viewBox="0 0 24 24" fill="none"><path d="M9 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4M9 7V5a2 2 0 014 0v2M9 7h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        <svg viewBox="0 0 50 50" className="spinner-ring">
+          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="94 32" strokeLinecap="round"/>
+        </svg>
+        <svg className="spinner-icon" viewBox="0 0 24 24" fill="none">
+          <path d="M9 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4M9 7V5a2 2 0 014 0v2M9 7h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
       </div>
       <p className="proc-title">Transcribing{dots}</p>
       <p className="proc-file">{fileName}</p>
@@ -232,7 +207,7 @@ function ProcessingView({fileName}:{fileName:string}){
   );
 }
 
-// ─── Right Panel: Style + Subtitles ──────────────────────────────────────────
+// ─── Right panel: Style + Subtitles tabs ─────────────────────────────────────
 function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
   style:SubStyle; onChange:(s:SubStyle)=>void;
   subtitles:Subtitle[]; onSubChange:(s:Subtitle[])=>void;
@@ -260,40 +235,41 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
     <div className="right-panel">
       <div className="tab-bar">
         <button className={`tab-btn ${tab==="style"?"on":""}`} onClick={()=>setTab("style")}>🎨 Style</button>
-        <button className={`tab-btn ${tab==="subs"?"on":""}`} onClick={()=>setTab("subs")}>📝 Subtitles <span className="tbadge">{subtitles.length}</span></button>
+        <button className={`tab-btn ${tab==="subs"?"on":""}`} onClick={()=>setTab("subs")}>
+          📝 Subtitles <span className="tbadge">{subtitles.length}</span>
+        </button>
       </div>
 
       {tab==="style"&&(
         <div className="tab-body">
-          {/* Presets */}
           <div className="sec-label">Preset</div>
-          <div className="presets-scroll">
+          <div className="presets-wrap">
             {PRESET_LIST.map(p=>(
-              <button key={p.key} className={`preset-pill ${style.preset===p.key?"on":""}`} onClick={()=>applyPreset(p.key)}>{p.emoji} {p.label}</button>
+              <button key={p.key} className={`preset-pill ${style.preset===p.key?"on":""}`}
+                onClick={()=>applyPreset(p.key)}>{p.emoji} {p.label}</button>
             ))}
           </div>
           <div className="divider"/>
 
-          {/* Font */}
           <div className="sec-label">Font</div>
           <select className="sel" value={style.fontName} onChange={e=>set({fontName:e.target.value})}>
             {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
           </select>
 
-          {/* Font size */}
           <div className="sec-label mt8">Font size <span className="val">{style.fontSize}px</span></div>
           <div className="size-row">
             <button className="size-btn" onClick={()=>set({fontSize:Math.max(10,style.fontSize-2)})}>−</button>
-            <input type="range" min={10} max={72} value={style.fontSize} onChange={e=>set({fontSize:Number(e.target.value)})} className="rng"/>
+            <input type="range" min={10} max={72} value={style.fontSize}
+              onChange={e=>set({fontSize:Number(e.target.value)})} className="rng"/>
             <button className="size-btn" onClick={()=>set({fontSize:Math.min(72,style.fontSize+2)})}>+</button>
             <span className="size-num">{style.fontSize}</span>
           </div>
           <div className="divider"/>
 
-          {/* Text color */}
           <div className="sec-label">Text color</div>
           <div className="color-row">
-            <input type="color" value={style.primaryColor} onChange={e=>set({primaryColor:e.target.value})} className="cpick"/>
+            <input type="color" className="cpick" value={style.primaryColor}
+              onChange={e=>set({primaryColor:e.target.value})}/>
             <span className="chex">{style.primaryColor}</span>
           </div>
           <div className="chips">
@@ -304,10 +280,10 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
             ))}
           </div>
 
-          {/* Outline color */}
           <div className="sec-label mt8">Outline color</div>
           <div className="color-row">
-            <input type="color" value={style.outlineColor} onChange={e=>set({outlineColor:e.target.value})} className="cpick"/>
+            <input type="color" className="cpick" value={style.outlineColor}
+              onChange={e=>set({outlineColor:e.target.value})}/>
             <span className="chex">{style.outlineColor}</span>
           </div>
           <div className="chips">
@@ -319,9 +295,11 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
           </div>
           <div className="divider"/>
 
-          {/* Background */}
-          <div className="sec-label">Background <span className="val">{style.bgOpacity===0?"off":`${Math.round(style.bgOpacity*100)}%`}</span></div>
-          <input type="range" min={0} max={1} step={0.05} value={style.bgOpacity} onChange={e=>set({bgOpacity:Number(e.target.value)})} className="rng"/>
+          <div className="sec-label">Background <span className="val">
+            {style.bgOpacity===0?"off":`${Math.round(style.bgOpacity*100)}%`}
+          </span></div>
+          <input type="range" min={0} max={1} step={0.05} value={style.bgOpacity}
+            onChange={e=>set({bgOpacity:Number(e.target.value)})} className="rng"/>
         </div>
       )}
 
@@ -333,11 +311,14 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
                 <div className="si-n">{i+1}</div>
                 <div className="si-body">
                   <div className="si-times">
-                    <input className="tc" defaultValue={toTimecode(sub.start)} onBlur={e=>updTime(i,"start",e.target.value)}/>
+                    <input className="tc" defaultValue={toTimecode(sub.start)}
+                      onBlur={e=>updTime(i,"start",e.target.value)}/>
                     <span className="tc-arr">→</span>
-                    <input className="tc" defaultValue={toTimecode(sub.end)} onBlur={e=>updTime(i,"end",e.target.value)}/>
+                    <input className="tc" defaultValue={toTimecode(sub.end)}
+                      onBlur={e=>updTime(i,"end",e.target.value)}/>
                   </div>
-                  <textarea className="si-txt" value={sub.text} onChange={e=>updT(i,e.target.value)} rows={2}/>
+                  <textarea className="si-txt" value={sub.text}
+                    onChange={e=>updT(i,e.target.value)} rows={2}/>
                 </div>
                 <div className="si-meta">
                   <span className="cdot" style={{background:sub.confidence>0.85?"var(--grn)":sub.confidence>0.7?"var(--amb)":"var(--red)"}}/>
@@ -352,7 +333,9 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
   );
 }
 
-function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];videoFile:File|null;style:SubStyle;onBack:()=>void}){
+function ExportPanel({subtitles,videoFile,style,onBack}:{
+  subtitles:Subtitle[];videoFile:File|null;style:SubStyle;onBack:()=>void;
+}){
   const [rendering,setRendering]=useState(false);
   const [done,setDone]=useState(false);
   const dl=(url:string,name:string)=>{const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);};
@@ -365,10 +348,10 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];vi
       form.append("subtitles",JSON.stringify(subtitles));
       form.append("style",JSON.stringify(style));
       const res=await fetch("/api/render",{method:"POST",body:form});
-      if(!res.ok)throw new Error("Render failed");
+      if(!res.ok)throw new Error(await res.text());
       dl(URL.createObjectURL(await res.blob()),"subflow_export.mp4");
       setDone(true);
-    }catch{alert("Render failed. Check server logs.");}
+    }catch(e:any){alert("Render failed: "+e.message);}
     finally{setRendering(false);}
   };
   return(
@@ -376,10 +359,17 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];vi
       <h3>Export</h3>
       <p className="export-sub">Choose your output format</p>
       <div className="export-grid">
-        <button className="export-card" onClick={()=>post("/api/export/srt","subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
-        <button className="export-card" onClick={()=>post("/api/export/vtt","subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
-        <button className="export-card" onClick={()=>navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"))}><span className="ei">📋</span><span className="el">Copy Text</span><span className="ed">Plain transcript</span></button>
-        <button className={`export-card accent ${rendering?"loading":""} ${done?"done":""}`} onClick={render} disabled={rendering||!videoFile}>
+        <button className="export-card" onClick={()=>post("/api/export/srt","subtitles.srt")}>
+          <span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span>
+        </button>
+        <button className="export-card" onClick={()=>post("/api/export/vtt","subtitles.vtt")}>
+          <span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span>
+        </button>
+        <button className="export-card" onClick={()=>navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"))}>
+          <span className="ei">📋</span><span className="el">Copy Text</span><span className="ed">Plain transcript</span>
+        </button>
+        <button className={`export-card accent ${rendering?"loading":""} ${done?"done":""}`}
+          onClick={render} disabled={rendering||!videoFile}>
           <span className="ei">{done?"✅":"🎬"}</span>
           <span className="el">{rendering?"Rendering…":done?"Downloaded!":"Burn to Video"}</span>
           <span className="ed">Embed subtitles into MP4</span>
@@ -390,6 +380,7 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];vi
   );
 }
 
+// ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App(){
   const [step,setStep]=useState<Step>("upload");
   const [videoFile,setVideoFile]=useState<File|null>(null);
@@ -399,9 +390,42 @@ export default function App(){
   const [style,setStyle]=useState<SubStyle>(DEFAULT_STYLE);
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
-  const [videoNaturalSize,setVideoNaturalSize]=useState({w:0,h:0});
 
-  const handleFile=useCallback((f:File)=>{setVideoFile(f);setVideoUrl(URL.createObjectURL(f));setError(null);},[]);
+  // Native video dimensions (for font scaling)
+  const [nativeSize,setNativeSize]=useState({w:0,h:0});
+  // Actual rendered video area dimensions (updated on resize)
+  const [fontScale,setFontScale]=useState(0.5);
+  const videoRef=useRef<HTMLVideoElement>(null);
+  const wrapRef=useRef<HTMLDivElement>(null);
+
+  // Recalculate fontScale whenever native size or container size changes
+  const recalcScale=useCallback(()=>{
+    const vid=videoRef.current;
+    const wrap=wrapRef.current;
+    if(!vid||!wrap||nativeSize.w===0||nativeSize.h===0)return;
+    const cW=wrap.clientWidth, cH=wrap.clientHeight;
+    if(cW===0||cH===0)return;
+    const vAspect=nativeSize.w/nativeSize.h;
+    const cAspect=cW/cH;
+    // object-fit:contain rendered dimensions
+    const renderedH=vAspect>cAspect?cW/vAspect:cH;
+    setFontScale(renderedH/nativeSize.h);
+  },[nativeSize]);
+
+  useEffect(()=>{
+    recalcScale();
+    const obs=new ResizeObserver(recalcScale);
+    if(wrapRef.current)obs.observe(wrapRef.current);
+    return()=>obs.disconnect();
+  },[recalcScale]);
+
+  const handleFile=useCallback((f:File)=>{
+    setVideoFile(f);
+    setVideoUrl(URL.createObjectURL(f));
+    setError(null);
+    setNativeSize({w:0,h:0});
+    setFontScale(0.5);
+  },[]);
 
   const startTranscription=async()=>{
     if(!videoFile)return;
@@ -427,7 +451,14 @@ export default function App(){
       <div className="app">
         <header className="hdr">
           <div className="logo">
-            <svg viewBox="0 0 32 32" fill="none" width="22" height="22"><rect x="2" y="6" width="28" height="20" rx="3" stroke="#f59e0b" strokeWidth="1.5"/><path d="M13 13L19 16L13 19V13Z" fill="#f59e0b"/><path d="M2 12H30" stroke="#f59e0b" strokeWidth="1.5"/><circle cx="6" cy="9" r="1" fill="#f59e0b"/><circle cx="9.5" cy="9" r="1" fill="#f59e0b"/><circle cx="13" cy="9" r="1" fill="#f59e0b"/></svg>
+            <svg viewBox="0 0 32 32" fill="none" width="22" height="22">
+              <rect x="2" y="6" width="28" height="20" rx="3" stroke="#f59e0b" strokeWidth="1.5"/>
+              <path d="M13 13L19 16L13 19V13Z" fill="#f59e0b"/>
+              <path d="M2 12H30" stroke="#f59e0b" strokeWidth="1.5"/>
+              <circle cx="6" cy="9" r="1" fill="#f59e0b"/>
+              <circle cx="9.5" cy="9" r="1" fill="#f59e0b"/>
+              <circle cx="13" cy="9" r="1" fill="#f59e0b"/>
+            </svg>
             <span className="logo-txt">SubFlow</span>
           </div>
           <div className="steps-nav">
@@ -455,8 +486,14 @@ export default function App(){
               {videoFile&&(
                 <div className="file-card fade-in">
                   <div className="file-row">
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style={{color:"var(--amb)",flexShrink:0}}><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M10 9L15 12L10 15V9Z" fill="currentColor"/></svg>
-                    <div><p className="fname">{videoFile.name}</p><p className="fmeta">{formatSize(videoFile.size)}</p></div>
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style={{color:"var(--amb)",flexShrink:0}}>
+                      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+                      <path d="M10 9L15 12L10 15V9Z" fill="currentColor"/>
+                    </svg>
+                    <div>
+                      <p className="fname">{videoFile.name}</p>
+                      <p className="fmeta">{formatSize(videoFile.size)}</p>
+                    </div>
                     <button className="clear-btn" onClick={()=>{setVideoFile(null);setVideoUrl("");}}>×</button>
                   </div>
                   <div className="fld">
@@ -466,7 +503,9 @@ export default function App(){
                     </select>
                   </div>
                   <button className="btn-primary" onClick={startTranscription}>
-                    <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/></svg>
+                    <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/>
+                    </svg>
                     Start transcription
                   </button>
                 </div>
@@ -480,26 +519,25 @@ export default function App(){
 
           {step==="edit"&&(
             <div className="editor-page fade-in">
-              {/* Video column */}
               <div className="vid-col">
-                <div className="vid-wrap" id="vid-wrap">
-                  <video src={videoUrl} controls className="vid-el"
+                <div className="vid-wrap" ref={wrapRef}>
+                  <video ref={videoRef} src={videoUrl} controls className="vid-el"
+                    onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
-                      setVideoNaturalSize({w:v.videoWidth,h:v.videoHeight});
-                    }}
-                    onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}/>
-                  <div className="sub-overlay-layer">
-                    <SubtitleBox
-                      text={currentSub?.text??"Sample subtitle text"}
-                      style={style}
-                      onChange={setStyle}
-                    />
-                  </div>
+                      setNativeSize({w:v.videoWidth,h:v.videoHeight});
+                      setTimeout(recalcScale,100);
+                    }}/>
+                  {/* Subtitle box overlay — always visible for positioning */}
+                  <SubtitleBox
+                    text={currentSub?.text??"Sample subtitle text"}
+                    style={style}
+                    onChange={setStyle}
+                    fontScale={fontScale}
+                  />
                 </div>
-                <p className="drag-hint">⠿ Drag to move · drag corners/edges to resize</p>
+                <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
-              {/* Right panel */}
               <RightPanel
                 style={style} onChange={setStyle}
                 subtitles={subtitles} onSubChange={setSubtitles}
@@ -578,45 +616,40 @@ const CSS=`
   .proc-steps{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
   .sbadge{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid var(--brd);color:var(--mut);background:var(--s1);font-family:'JetBrains Mono',monospace}
   .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
-  /* Editor layout */
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
-  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;background:var(--bg);gap:6px}
-  .vid-wrap{position:relative;width:100%;max-width:560px;background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-  .sub-overlay-layer{position:absolute;inset:0;pointer-events:none}
-  .sub-overlay-layer>*{pointer-events:all}
-  .vid-el{width:100%;display:block;max-height:calc(100vh - 110px);object-fit:contain}
+  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:6px}
+  .vid-wrap{position:relative;width:100%;max-width:520px;max-height:calc(100vh - 120px);background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .vid-el{width:100%;max-height:calc(100vh - 120px);display:block;object-fit:contain}
   .drag-hint{font-size:11px;color:var(--mut)}
-  /* Right panel */
-  .right-panel{width:300px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
+  .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
   .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
   .tab-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-size:12px;font-weight:500;padding:11px 8px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:-1px}
   .tab-btn.on{color:var(--amb);border-bottom-color:var(--amb)}
   .tbadge{background:var(--s2);border:1px solid var(--brd);border-radius:20px;font-family:'JetBrains Mono',monospace;font-size:9px;padding:1px 6px;color:var(--mut)}
   .tab-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
-  .tab-body.no-pad{padding:0}
+  .tab-body.no-pad{padding:0;flex:1;overflow:hidden;display:flex;flex-direction:column}
   .tab-body::-webkit-scrollbar{width:3px}
   .tab-body::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
   .sec-label{font-size:10px;color:var(--mut);font-weight:500;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
   .sec-label.mt8{margin-top:4px}
   .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:10px}
-  .presets-scroll{display:flex;flex-wrap:wrap;gap:5px;padding-bottom:2px}
+  .presets-wrap{display:flex;flex-wrap:wrap;gap:5px}
   .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:11px;padding:4px 10px;cursor:pointer;transition:all .2s;white-space:nowrap}
   .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .divider{height:1px;background:var(--brd);margin:4px 0}
   .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:12px;padding:7px 9px;cursor:pointer;outline:none;width:100%}
   .sel:focus{border-color:var(--amb)}
   .size-row{display:flex;align-items:center;gap:6px}
-  .size-btn{background:var(--s2);border:1px solid var(--brd);border-radius:6px;color:var(--txt);font-size:16px;width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;line-height:1}
+  .size-btn{background:var(--s2);border:1px solid var(--brd);border-radius:6px;color:var(--txt);font-size:16px;width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
   .size-btn:hover{border-color:var(--amb);color:var(--amb)}
   .size-num{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--amb);min-width:26px;text-align:center;flex-shrink:0}
-  .rng{flex:1;accent-color:var(--amb);cursor:pointer;height:4px}
+  .rng{flex:1;accent-color:var(--amb);cursor:pointer}
   .color-row{display:flex;align-items:center;gap:7px}
   .cpick{width:26px;height:26px;border:none;background:none;cursor:pointer;padding:0;border-radius:5px;flex-shrink:0}
   .chex{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--mut)}
   .chips{display:flex;gap:5px;margin-top:3px}
   .chip{width:18px;height:18px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
   .chip.on{border-color:var(--amb);transform:scale(1.2)}
-  /* Subtitle list */
   .sub-list{flex:1;overflow-y:auto}
   .sub-list::-webkit-scrollbar{width:3px}
   .sub-list::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
@@ -635,7 +668,6 @@ const CSS=`
   .cdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
   .del-btn{background:none;border:none;color:var(--mut);font-size:14px;cursor:pointer;transition:color .2s;line-height:1}
   .del-btn:hover{color:var(--red)}
-  /* Export */
   .export-panel{display:flex;flex-direction:column;gap:18px}
   .export-panel h3{font-family:'Syne',sans-serif;font-weight:800;font-size:24px}
   .export-sub{color:var(--mut);font-size:13px;margin-top:-10px}
@@ -646,5 +678,6 @@ const CSS=`
   .export-card.loading{opacity:.6;cursor:wait}
   .export-card.done{border-color:var(--grn);background:rgba(52,211,153,0.08)}
   .ei{font-size:19px}.el{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--txt)}.ed{font-size:11px;color:var(--mut)}
-  @media(max-width:700px){.right-panel{width:260px}.editor-page{flex-direction:column}.vid-col{flex:none;height:50%}.right-panel{width:100%;border-left:none;border-top:1px solid var(--brd)}}
+  @media(max-width:700px){.right-panel{width:260px}}
+  @media(max-width:600px){.editor-page{flex-direction:column}.vid-col{flex:none;height:55%}.right-panel{width:100%;border-left:none;border-top:1px solid var(--brd)}}
 `;
