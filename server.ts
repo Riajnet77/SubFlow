@@ -166,14 +166,13 @@ async function startServer() {
   app.post("/api/render", upload.single("video"), async (req, res) => {
     const videoPath = req.file?.path ?? "";
     const id = uuidv4();
-    const srtPath = path.join(WORK_DIR, `${id}.srt`);
+    const assPath  = path.join(WORK_DIR, `${id}.ass`);
     const outputPath = path.join(WORK_DIR, `${id}_output.mp4`);
     try {
       if (!req.file || !req.body.subtitles) { res.status(400).json({ error: "Video and subtitles required." }); return; }
 
       const subtitles = JSON.parse(req.body.subtitles);
       if (!Array.isArray(subtitles) || subtitles.length === 0) { res.status(400).json({ error: "Empty subtitles." }); return; }
-      fs.writeFileSync(srtPath, buildSrt(subtitles));
 
       const style = req.body.style ? JSON.parse(req.body.style) : {};
       const fontSize     = Number(style.fontSize ?? 18);
@@ -181,70 +180,106 @@ async function startServer() {
       const primaryColor = String(style.primaryColor ?? "#FFFFFF");
       const outlineColor = String(style.outlineColor ?? "#000000");
       const bgOpacity    = Number(style.bgOpacity ?? 0);
+      const box          = style.box ?? { x: 5, y: 78, w: 90, h: 14 };
 
-      // box: {x, y, w, h} as % of video — convert to ASS margins
-      // ASS default PlayResX=384 PlayResY=288
-      const box = style.box ?? { x: 5, y: 75, w: 90, h: 18 };
-      const boxCenterY = box.y + box.h / 2; // % from top
+      // 1. Get actual video dimensions via ffprobe
+      const probeData: {width:number;height:number} = await new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(videoPath, (err: any, data: any) => {
+          if (err) return reject(err);
+          const vs = data.streams?.find((s:any) => s.codec_type === "video");
+          resolve({ width: vs?.width ?? 1080, height: vs?.height ?? 1920 });
+        });
+      });
+      const VW = probeData.width;
+      const VH = probeData.height;
+      console.log(`[render] Video: ${VW}x${VH}, fontSize: ${fontSize}`);
 
-      // Choose alignment based on vertical center of box
-      let alignment: number;
-      let marginV: number;
-      const PH = 288, PW = 384;
+      // 2. Convert hex to ASS color (&H00BBGGRR)
+      const hexToAss = (hex: string) => {
+        const h = hex.replace("#","").padEnd(6,"0");
+        return `&H00${h.slice(4,6)}${h.slice(2,4)}${h.slice(0,2)}`.toUpperCase();
+      };
 
+      // 3. Calculate pixel positions from box % of video dimensions
+      const boxX = Math.round((box.x / 100) * VW);
+      const boxY = Math.round((box.y / 100) * VH);
+      const boxW = Math.round((box.w / 100) * VW);
+      const boxH = Math.round((box.h / 100) * VH);
+      const boxCenterY = box.y + box.h / 2;
+
+      // ASS alignment: 2=bottom-center, 5=middle-center, 8=top-center
+      let alignment = 2, marginV = 0, marginL = 0, marginR = 0;
       if (boxCenterY < 38) {
-        alignment = 8; // top-center
-        marginV = Math.round((box.y / 100) * PH);
+        alignment = 8;
+        marginV = boxY;
       } else if (boxCenterY > 62) {
-        alignment = 2; // bottom-center
-        marginV = Math.round(((100 - box.y - box.h) / 100) * PH);
+        alignment = 2;
+        marginV = VH - boxY - boxH;
       } else {
-        alignment = 5; // middle-center
+        alignment = 5;
         marginV = 0;
       }
+      marginL = boxX;
+      marginR = VW - boxX - boxW;
 
-      const marginL = Math.max(0, Math.round((box.x / 100) * PW));
-      const marginR = Math.max(0, Math.round(((100 - box.x - box.w) / 100) * PW));
+      // 4. Background color with opacity
       const bgAlpha = Math.round((1 - bgOpacity) * 255).toString(16).padStart(2,"0").toUpperCase();
+      const backColour = `&H${bgAlpha}000000`;
+      const borderStyle = bgOpacity > 0 ? 4 : 1;
+      const outline     = bgOpacity > 0 ? 0 : Math.round(fontSize * 0.08);
 
-      const forceStyle = [
-        `FontName=${fontName}`,
-        `FontSize=${fontSize}`,
-        `PrimaryColour=${hexToAss(primaryColor)}`,
-        `OutlineColour=${hexToAss(outlineColor)}`,
-        `BackColour=&H${bgAlpha}000000`,
-        `BorderStyle=${bgOpacity > 0 ? 4 : 1}`,
-        `Outline=${bgOpacity > 0 ? 0 : 2}`,
-        `Shadow=0`,
-        `Alignment=${alignment}`,
-        `MarginV=${marginV}`,
-        `MarginL=${marginL}`,
-        `MarginR=${marginR}`,
-        `WrapStyle=1`,
-      ].join(",");
+      // 5. Build proper ASS file with PlayRes = actual video dimensions (1:1 pixel mapping)
+      const assToTime = (sec: number) => {
+        const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60),
+              s = Math.floor(sec%60),   cs = Math.round((sec%1)*100);
+        return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(cs).padStart(2,"0")}`;
+      };
 
-      const escapedSrt = srtPath.replace(/\\/g,"/").replace(/:/g,"\\:");
-      console.log(`[render] forceStyle: ${forceStyle}`);
+      const assHeader = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${VW}
+PlayResY: ${VH}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Default,${fontName},${fontSize},${hexToAss(primaryColor)},${hexToAss(primaryColor)},${hexToAss(outlineColor)},${backColour},0,0,0,0,100,100,0,0,${borderStyle},${outline},0,${alignment},${Math.max(0,marginL)},${Math.max(0,marginR)},${Math.max(0,marginV)},1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+`;
+      const assEvents = subtitles.map((s:any) =>
+        `Dialogue: 0,${assToTime(s.start)},${assToTime(s.end)},Default,,0,0,0,,${String(s.text).replace(/\n/g,"\N").trim()}`
+      ).join("\n");
+
+      fs.writeFileSync(assPath, assHeader + assEvents, "utf8");
+
+      // 6. Burn with ffmpeg using ASS filter (pixel-accurate)
+      const escapedAss = assPath.replace(/\\/g,"/").replace(/:/g,"\:");
+      console.log(`[render] Burning subtitles: align=${alignment} marginV=${marginV} marginL=${marginL} marginR=${marginR}`);
 
       await new Promise<void>((resolve, reject) => {
         ffmpeg(videoPath).videoCodec("libx264")
           .outputOptions([
-            `-vf subtitles='${escapedSrt}':force_style='${forceStyle}'`,
+            `-vf ass='${escapedAss}'`,
             "-preset veryfast", "-crf 23", "-movflags +faststart",
           ])
           .audioCodec("aac").audioBitrate("128k")
-          .on("end", resolve).on("error", reject).save(outputPath);
+          .on("end", resolve)
+          .on("error", reject)
+          .save(outputPath);
       });
 
-      res.download(outputPath, "subflow_export.mp4", () => cleanupFiles(videoPath, srtPath, outputPath));
+      console.log(`[render] Done.`);
+      res.download(outputPath, "subflow_export.mp4", () => { cleanupFiles(videoPath, assPath, outputPath); });
     } catch (err: any) {
       console.error("[render] Error:", err?.message ?? err);
-      cleanupFiles(videoPath, srtPath, outputPath);
+      cleanupFiles(videoPath, assPath, outputPath);
       if (!res.headersSent) res.status(500).json({ error: err?.message ?? "Render failed." });
     }
   });
 
-  // ─── /api/export/srt ──────────────────────────────────────────────────────
+    // ─── /api/export/srt ──────────────────────────────────────────────────────
   app.post("/api/export/srt", (req, res) => {
     try {
       const { subtitles } = req.body;
