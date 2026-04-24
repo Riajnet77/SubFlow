@@ -72,6 +72,7 @@ function SubtitleBox({text,style,onChange,videoNaturalSize}:{
   videoNaturalSize:{w:number;h:number};
 }){
   const [sel,setSel]=useState(false);
+  const [scaledFontPx,setScaledFontPx]=useState(Math.round(style.fontSize*0.5));
   const ref=useRef<HTMLDivElement>(null);
   const drag=useRef<{type:string;sx:number;sy:number;sb:SubBox}|null>(null);
 
@@ -80,6 +81,24 @@ function SubtitleBox({text,style,onChange,videoNaturalSize}:{
     document.addEventListener("mousedown",h);
     return()=>document.removeEventListener("mousedown",h);
   },[]);
+
+  // Recalculate font scale whenever style.fontSize or videoNaturalSize changes
+  useEffect(()=>{
+    const wrap=ref.current?.parentElement;
+    if(!wrap||videoNaturalSize.w===0||videoNaturalSize.h===0){
+      setScaledFontPx(Math.round(style.fontSize*0.5));
+      return;
+    }
+    const vid=wrap.querySelector("video") as HTMLVideoElement|null;
+    const cW=vid?vid.clientWidth:wrap.clientWidth;
+    const cH=vid?vid.clientHeight:wrap.clientHeight;
+    if(cW===0||cH===0){setScaledFontPx(Math.round(style.fontSize*0.5));return;}
+    const vAspect=videoNaturalSize.w/videoNaturalSize.h;
+    const cAspect=cW/cH;
+    const renderedH=vAspect>cAspect?cW/vAspect:cH;
+    const scale=renderedH/videoNaturalSize.h;
+    setScaledFontPx(Math.max(8,Math.round(style.fontSize*scale)));
+  },[style.fontSize,videoNaturalSize]);
 
   const pSize=()=>{const p=ref.current?.parentElement;return p?{w:p.clientWidth,h:p.clientHeight}:{w:1,h:1};};
   const clamp=(b:SubBox):SubBox=>({
@@ -152,20 +171,7 @@ function SubtitleBox({text,style,onChange,videoNaturalSize}:{
       <span style={{
         fontFamily:style.fontName,
         // Scale preview font to match export: ratio of displayed container vs real video
-        fontSize:(()=>{
-          const wrap=ref.current?.parentElement;
-          if(!wrap||videoNaturalSize.w===0||videoNaturalSize.h===0)return style.fontSize*0.5+"px";
-          // Find actual rendered video size (object-fit:contain may add letterboxes)
-          const vid=wrap.querySelector("video") as HTMLVideoElement|null;
-          const cW = vid ? vid.clientWidth  : wrap.clientWidth;
-          const cH = vid ? vid.clientHeight : wrap.clientHeight;
-          const vAspect = videoNaturalSize.w / videoNaturalSize.h;
-          const cAspect = cW / cH;
-          // Rendered dimensions = object-fit:contain result
-          const renderedH = vAspect > cAspect ? cW / vAspect : cH;
-          const scale = renderedH / videoNaturalSize.h;
-          return Math.round(style.fontSize * scale) + "px";
-        })(),
+        fontSize:scaledFontPx+'px',
         color:style.primaryColor,textShadow:ts,
         background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
         padding:style.bgOpacity>0?"2px 8px":"0",
