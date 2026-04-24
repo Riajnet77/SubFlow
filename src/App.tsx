@@ -67,7 +67,10 @@ function toTimecode(s:number){
 function formatSize(b:number){return b<1024*1024?`${(b/1024).toFixed(1)} KB`:`${(b/(1024*1024)).toFixed(1)} MB`;}
 
 // ─── Draggable+Resizable Box ──────────────────────────────────────────────────
-function SubtitleBox({text,style,onChange}:{text:string;style:SubStyle;onChange:(s:SubStyle)=>void}){
+function SubtitleBox({text,style,onChange,videoNaturalSize}:{
+  text:string;style:SubStyle;onChange:(s:SubStyle)=>void;
+  videoNaturalSize:{w:number;h:number};
+}){
   const [sel,setSel]=useState(false);
   const ref=useRef<HTMLDivElement>(null);
   const drag=useRef<{type:string;sx:number;sy:number;sb:SubBox}|null>(null);
@@ -112,6 +115,9 @@ function SubtitleBox({text,style,onChange}:{text:string;style:SubStyle;onChange:
   };
   const pu=()=>{drag.current=null;};
 
+  // Scale font proportionally: preview rendered height / actual video height
+  const fontScale = videoNativeH > 0 && previewH > 0 ? previewH / videoNativeH : 0.5;
+  const scaledFont = Math.round(style.fontSize * fontScale);
   const ts=style.bgOpacity===0
     ?`1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     :"none";
@@ -145,7 +151,21 @@ function SubtitleBox({text,style,onChange}:{text:string;style:SubStyle;onChange:
     >
       <span style={{
         fontFamily:style.fontName,
-        fontSize:`min(${style.fontSize*0.55}px, ${style.box.h*0.65}vh)` as any,
+        // Scale preview font to match export: ratio of displayed container vs real video
+        fontSize:(()=>{
+          const wrap=ref.current?.parentElement;
+          if(!wrap||videoNaturalSize.w===0||videoNaturalSize.h===0)return style.fontSize*0.5+"px";
+          // Find actual rendered video size (object-fit:contain may add letterboxes)
+          const vid=wrap.querySelector("video") as HTMLVideoElement|null;
+          const cW = vid ? vid.clientWidth  : wrap.clientWidth;
+          const cH = vid ? vid.clientHeight : wrap.clientHeight;
+          const vAspect = videoNaturalSize.w / videoNaturalSize.h;
+          const cAspect = cW / cH;
+          // Rendered dimensions = object-fit:contain result
+          const renderedH = vAspect > cAspect ? cW / vAspect : cH;
+          const scale = renderedH / videoNaturalSize.h;
+          return Math.round(style.fontSize * scale) + "px";
+        })(),
         color:style.primaryColor,textShadow:ts,
         background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
         padding:style.bgOpacity>0?"2px 8px":"0",
@@ -373,6 +393,7 @@ export default function App(){
   const [style,setStyle]=useState<SubStyle>(DEFAULT_STYLE);
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
+  const [videoNaturalSize,setVideoNaturalSize]=useState({w:0,h:0});
 
   const handleFile=useCallback((f:File)=>{setVideoFile(f);setVideoUrl(URL.createObjectURL(f));setError(null);},[]);
 
@@ -457,6 +478,10 @@ export default function App(){
               <div className="vid-col">
                 <div className="vid-wrap" id="vid-wrap">
                   <video src={videoUrl} controls className="vid-el"
+                    onLoadedMetadata={e=>{
+                      const v=e.target as HTMLVideoElement;
+                      setVideoNaturalSize({w:v.videoWidth,h:v.videoHeight});
+                    }}
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}/>
                   <div className="sub-overlay-layer">
                     <SubtitleBox
@@ -550,7 +575,7 @@ const CSS=`
   /* Editor layout */
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
   .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;background:var(--bg);gap:6px}
-  .vid-wrap{position:relative;width:100%;max-width:560px;background:#000;border-radius:12px;overflow:hidden}
+  .vid-wrap{position:relative;width:100%;max-width:560px;background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
   .sub-overlay-layer{position:absolute;inset:0;pointer-events:none}
   .sub-overlay-layer>*{pointer-events:all}
   .vid-el{width:100%;display:block;max-height:calc(100vh - 110px);object-fit:contain}
