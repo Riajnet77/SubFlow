@@ -512,21 +512,20 @@ export default function App(){
           {step==="edit"&&(
             <div className="editor-page fade-in">
               <div className="vid-col">
-                {/* Wrap is forced to exact video aspect ratio — no black bars, perfect 1:1 mapping */}
+                {/* vid-wrap: fixed height + aspect-ratio = exact video shape, no black bars */}
                 <div className="vid-wrap" ref={wrapRef} style={{
-                  paddingTop: nativeSize.w>0 ? `${(nativeSize.h/nativeSize.w)*100}%` : "177.78%",
-                  maxHeight:"calc(100vh - 120px)",
-                  maxWidth: nativeSize.w>0 ? `calc((100vh - 120px) * ${nativeSize.w/Math.max(nativeSize.h,1)})` : "520px",
+                  aspectRatio: nativeSize.w>0 ? `${nativeSize.w}/${nativeSize.h}` : "9/16",
+                  height: "min(calc(100vh - 120px), 70vw * " + (nativeSize.w>0 ? nativeSize.h/nativeSize.w : 16/9) + ")",
+                  width:"auto", maxWidth:"100%",
                 }}>
-                  <video ref={videoRef} src={videoUrl} controls
-                    style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",display:"block"}}
+                  <video ref={videoRef} src={videoUrl} controls className="vid-el-abs"
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
                       setNativeSize({w:v.videoWidth,h:v.videoHeight});
                       setTimeout(recalcScale,50);
                     }}/>
-                  {/* SubtitleBox % = video % directly, no offset needed */}
+                  {/* SubtitleBox % = video % exactly — wrap has same aspect ratio as video */}
                   <SubtitleBox
                     text={currentSub?.text??"Sample subtitle text"}
                     style={style}
@@ -616,7 +615,8 @@ const CSS=`
   .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
   .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:6px}
-  .vid-wrap{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden}
+  .vid-wrap{position:relative;background:#000;border-radius:12px;overflow:hidden;flex-shrink:0}
+  .vid-el-abs{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:contain}
 
   .drag-hint{font-size:11px;color:var(--mut)}
   .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
