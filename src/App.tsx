@@ -391,45 +391,32 @@ export default function App(){
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
 
-  // Native video dimensions
+  // Native video dimensions — used to set wrap aspect ratio and font scale
   const [nativeSize,setNativeSize]=useState({w:0,h:0});
-  // Exact rendered video area within the wrap (pixels, accounts for letterbox/pillarbox)
-  const [videoArea,setVideoArea]=useState({left:0,top:0,width:0,height:0});
   const videoRef=useRef<HTMLVideoElement>(null);
   const wrapRef=useRef<HTMLDivElement>(null);
 
-  // Recalculate actual rendered video area (object-fit:contain)
-  const recalcArea=useCallback(()=>{
+  // fontScale = wrap displayed height / native video height
+  // Since wrap is forced to exact video aspect ratio, no letterbox → 1:1 mapping
+  const [fontScale,setFontScale]=useState(0.25);
+  const recalcScale=useCallback(()=>{
     const wrap=wrapRef.current;
-    if(!wrap||nativeSize.w===0||nativeSize.h===0)return;
-    const cW=wrap.clientWidth, cH=wrap.clientHeight;
-    if(cW===0||cH===0)return;
-    const vAspect=nativeSize.w/nativeSize.h;
-    const cAspect=cW/cH;
-    let rW:number, rH:number;
-    if(vAspect>cAspect){ rW=cW; rH=cW/vAspect; }
-    else { rH=cH; rW=cH*vAspect; }
-    setVideoArea({
-      left:Math.round((cW-rW)/2),
-      top:Math.round((cH-rH)/2),
-      width:Math.round(rW),
-      height:Math.round(rH),
-    });
+    if(!wrap||nativeSize.h===0)return;
+    setFontScale(wrap.clientHeight/nativeSize.h);
   },[nativeSize]);
-
   useEffect(()=>{
-    recalcArea();
-    const obs=new ResizeObserver(recalcArea);
+    recalcScale();
+    const obs=new ResizeObserver(recalcScale);
     if(wrapRef.current)obs.observe(wrapRef.current);
     return()=>obs.disconnect();
-  },[recalcArea]);
+  },[recalcScale]);
 
   const handleFile=useCallback((f:File)=>{
     setVideoFile(f);
     setVideoUrl(URL.createObjectURL(f));
     setError(null);
     setNativeSize({w:0,h:0});
-    setVideoArea({left:0,top:0,width:0,height:0});
+    setFontScale(0.25);
   },[]);
 
   const startTranscription=async()=>{
@@ -525,32 +512,27 @@ export default function App(){
           {step==="edit"&&(
             <div className="editor-page fade-in">
               <div className="vid-col">
-                <div className="vid-wrap" ref={wrapRef}>
-                  <video ref={videoRef} src={videoUrl} controls className="vid-el"
+                {/* Wrap is forced to exact video aspect ratio — no black bars, perfect 1:1 mapping */}
+                <div className="vid-wrap" ref={wrapRef} style={{
+                  paddingTop: nativeSize.w>0 ? `${(nativeSize.h/nativeSize.w)*100}%` : "177.78%",
+                  maxHeight:"calc(100vh - 120px)",
+                  maxWidth: nativeSize.w>0 ? `calc((100vh - 120px) * ${nativeSize.w/Math.max(nativeSize.h,1)})` : "520px",
+                }}>
+                  <video ref={videoRef} src={videoUrl} controls
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",display:"block"}}
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
                       setNativeSize({w:v.videoWidth,h:v.videoHeight});
-                      setTimeout(recalcArea,100);
+                      setTimeout(recalcScale,50);
                     }}/>
-                  {/* Overlay covers ONLY the actual rendered video area — no letterbox offset */}
-                  {videoArea.width>0&&(
-                    <div style={{
-                      position:"absolute",
-                      left:videoArea.left,top:videoArea.top,
-                      width:videoArea.width,height:videoArea.height,
-                      pointerEvents:"none",
-                    }}>
-                      <div style={{position:"relative",width:"100%",height:"100%",pointerEvents:"all"}}>
-                        <SubtitleBox
-                          text={currentSub?.text??"Sample subtitle text"}
-                          style={style}
-                          onChange={setStyle}
-                          fontScale={videoArea.height/nativeSize.h}
-                        />
-                      </div>
-                    </div>
-                  )}
+                  {/* SubtitleBox % = video % directly, no offset needed */}
+                  <SubtitleBox
+                    text={currentSub?.text??"Sample subtitle text"}
+                    style={style}
+                    onChange={setStyle}
+                    fontScale={fontScale}
+                  />
                 </div>
                 <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
@@ -634,8 +616,8 @@ const CSS=`
   .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
   .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:6px}
-  .vid-wrap{position:relative;width:100%;max-width:520px;max-height:calc(100vh - 120px);background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
-  .vid-el{width:100%;max-height:calc(100vh - 120px);display:block;object-fit:contain}
+  .vid-wrap{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden}
+
   .drag-hint{font-size:11px;color:var(--mut)}
   .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
   .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
