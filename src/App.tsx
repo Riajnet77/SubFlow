@@ -391,40 +391,45 @@ export default function App(){
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
 
-  // Native video dimensions (for font scaling)
+  // Native video dimensions
   const [nativeSize,setNativeSize]=useState({w:0,h:0});
-  // Actual rendered video area dimensions (updated on resize)
-  const [fontScale,setFontScale]=useState(0.5);
+  // Exact rendered video area within the wrap (pixels, accounts for letterbox/pillarbox)
+  const [videoArea,setVideoArea]=useState({left:0,top:0,width:0,height:0});
   const videoRef=useRef<HTMLVideoElement>(null);
   const wrapRef=useRef<HTMLDivElement>(null);
 
-  // Recalculate fontScale whenever native size or container size changes
-  const recalcScale=useCallback(()=>{
-    const vid=videoRef.current;
+  // Recalculate actual rendered video area (object-fit:contain)
+  const recalcArea=useCallback(()=>{
     const wrap=wrapRef.current;
-    if(!vid||!wrap||nativeSize.w===0||nativeSize.h===0)return;
+    if(!wrap||nativeSize.w===0||nativeSize.h===0)return;
     const cW=wrap.clientWidth, cH=wrap.clientHeight;
     if(cW===0||cH===0)return;
     const vAspect=nativeSize.w/nativeSize.h;
     const cAspect=cW/cH;
-    // object-fit:contain rendered dimensions
-    const renderedH=vAspect>cAspect?cW/vAspect:cH;
-    setFontScale(renderedH/nativeSize.h);
+    let rW:number, rH:number;
+    if(vAspect>cAspect){ rW=cW; rH=cW/vAspect; }
+    else { rH=cH; rW=cH*vAspect; }
+    setVideoArea({
+      left:Math.round((cW-rW)/2),
+      top:Math.round((cH-rH)/2),
+      width:Math.round(rW),
+      height:Math.round(rH),
+    });
   },[nativeSize]);
 
   useEffect(()=>{
-    recalcScale();
-    const obs=new ResizeObserver(recalcScale);
+    recalcArea();
+    const obs=new ResizeObserver(recalcArea);
     if(wrapRef.current)obs.observe(wrapRef.current);
     return()=>obs.disconnect();
-  },[recalcScale]);
+  },[recalcArea]);
 
   const handleFile=useCallback((f:File)=>{
     setVideoFile(f);
     setVideoUrl(URL.createObjectURL(f));
     setError(null);
     setNativeSize({w:0,h:0});
-    setFontScale(0.5);
+    setVideoArea({left:0,top:0,width:0,height:0});
   },[]);
 
   const startTranscription=async()=>{
@@ -526,15 +531,26 @@ export default function App(){
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
                       setNativeSize({w:v.videoWidth,h:v.videoHeight});
-                      setTimeout(recalcScale,100);
+                      setTimeout(recalcArea,100);
                     }}/>
-                  {/* Subtitle box overlay — always visible for positioning */}
-                  <SubtitleBox
-                    text={currentSub?.text??"Sample subtitle text"}
-                    style={style}
-                    onChange={setStyle}
-                    fontScale={fontScale}
-                  />
+                  {/* Overlay covers ONLY the actual rendered video area — no letterbox offset */}
+                  {videoArea.width>0&&(
+                    <div style={{
+                      position:"absolute",
+                      left:videoArea.left,top:videoArea.top,
+                      width:videoArea.width,height:videoArea.height,
+                      pointerEvents:"none",
+                    }}>
+                      <div style={{position:"relative",width:"100%",height:"100%",pointerEvents:"all"}}>
+                        <SubtitleBox
+                          text={currentSub?.text??"Sample subtitle text"}
+                          style={style}
+                          onChange={setStyle}
+                          fontScale={videoArea.height/nativeSize.h}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
