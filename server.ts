@@ -111,7 +111,7 @@ async function startServer() {
         const conf=seg.avg_logprob?Math.min(0.99,Math.max(0.5,Math.exp(seg.avg_logprob))):0.85;
         return splitSeg(seg,conf);
       });
-            if(targetLang!=="original"&&langName&&subtitles.length>0){
+      if(targetLang!=="original"&&langName&&subtitles.length>0){
         console.log("[translate] "+subtitles.length+" lines → "+langName);
 
         // Translate one line at a time — guaranteed correct count, no mismatch
@@ -137,25 +137,6 @@ async function startServer() {
         }
         subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
         console.log("[translate] done "+translated.length+" lines");
-      });
-            const raw=(resp.choices[0].message.content??"[]").replace(/```json|```/g,"").trim();
-            let result:string[]=[];
-            try{result=JSON.parse(raw);}
-            catch{const m=raw.match(/\[[\s\S]*\]/);if(m)result=JSON.parse(m[0]);}
-            if(Array.isArray(result)&&result.length===batch.length){
-              translated.push(...result);
-            }else{
-              console.warn("[translate] mismatch, keeping originals for batch "+i);
-              translated.push(...batch);
-            }
-          }catch(e:any){
-            console.error("[translate] error: "+e?.message);
-            translated.push(...batch);
-          }
-        }
-        if(translated.length===subtitles.length){
-          subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
-        }
       }
       res.json({subtitles});
     }catch(err:any){
