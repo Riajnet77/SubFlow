@@ -111,19 +111,33 @@ async function startServer() {
         const conf=seg.avg_logprob?Math.min(0.99,Math.max(0.5,Math.exp(seg.avg_logprob))):0.85;
         return splitSeg(seg,conf);
       });
-      if(targetLang!=="original"&&langName&&subtitles.length>0){
+            if(targetLang!=="original"&&langName&&subtitles.length>0){
         console.log("[translate] "+subtitles.length+" lines → "+langName);
-        const BATCH=20;const allTexts=subtitles.map(s=>s.text);const translated:string[]=[];
-        for(let i=0;i<allTexts.length;i+=BATCH){
-          const batch=allTexts.slice(i,i+BATCH);
-          try{
-            const resp=await groq.chat.completions.create({
-              model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:2048,
+
+        // Translate one line at a time — guaranteed correct count, no mismatch
+        async function translateLine(text:string): Promise<string> {
+          try {
+            const r=await groq.chat.completions.create({
+              model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:200,
               messages:[
-                {role:"system",content:"Translate each subtitle line to "+langName+". Return ONLY a JSON array of strings. Same count as input. No markdown."},
-                {role:"user",content:JSON.stringify(batch)},
+                {role:"system",content:"Translate the following subtitle line to "+langName+". Reply with ONLY the translated text. No explanations, no quotes, no punctuation changes."},
+                {role:"user",content:text},
               ],
             });
+            const t=(r.choices[0].message.content??"").trim();
+            return t||text;
+          }catch{return text;}
+        }
+
+        const translated:string[]=[];
+        for(let i=0;i<subtitles.length;i++){
+          const t=await translateLine(subtitles[i].text);
+          translated.push(t);
+          if(i===0)console.log("[translate] sample: '"+subtitles[i].text+"' → '"+t+"'");
+        }
+        subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
+        console.log("[translate] done "+translated.length+" lines");
+      });
             const raw=(resp.choices[0].message.content??"[]").replace(/```json|```/g,"").trim();
             let result:string[]=[];
             try{result=JSON.parse(raw);}
