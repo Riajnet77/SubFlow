@@ -16,7 +16,9 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const UPLOAD_DIR = path.join(os.tmpdir(), "subflow_uploads");
 const WORK_DIR   = path.join(os.tmpdir(), "subflow_work");
-[UPLOAD_DIR, WORK_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+[UPLOAD_DIR, WORK_DIR].forEach(d => {
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+});
 
 const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 500 * 1024 * 1024 } });
 
@@ -48,12 +50,15 @@ function toAssTime(s: number): string {
 }
 
 function buildSrt(subs:{start:number;end:number;text:string}[]): string {
-  return subs.map((s,i)=>i+1+"\n"+toSrtTime(s.start)+" --> "+toSrtTime(s.end)+"\n"+s.text.trim()).join("\n\n")+"\n";
+  return subs.map((s,i)=>
+    (i+1)+"\n"+toSrtTime(s.start)+" --> "+toSrtTime(s.end)+"\n"+s.text.trim()
+  ).join("\n\n")+"\n";
 }
 
 function extractAudio(input:string, output:string): Promise<void> {
   return new Promise((resolve,reject)=>{
-    ffmpeg(input).noVideo().audioCodec("libmp3lame").audioBitrate(128).audioChannels(1).audioFrequency(16000)
+    ffmpeg(input).noVideo().audioCodec("libmp3lame").audioBitrate(128)
+      .audioChannels(1).audioFrequency(16000)
       .on("end",resolve).on("error",reject).save(output);
   });
 }
@@ -74,7 +79,7 @@ async function startServer() {
   app.use(cors());
   app.use(express.json({limit:"10mb"}));
 
-  // ── TRANSCRIBE ──────────────────────────────────────────────────────────────
+  // TRANSCRIBE
   app.post("/api/transcribe", upload.single("video"), async (req,res)=>{
     const videoPath=req.file?.path??"";
     const audioPath=path.join(WORK_DIR, uuidv4()+".mp3");
@@ -83,18 +88,22 @@ async function startServer() {
       const targetLang=String(req.body.targetLang??"original").trim();
       const langName=LANG_NAMES[targetLang]??"";
       const apiKey=process.env.GROQ_API_KEY;
-      console.log("[transcribe] lang="+targetLang+" langName="+langName);
+      console.log("[transcribe] lang="+targetLang+" ("+langName+")");
       if(!apiKey){res.status(500).json({error:"GROQ_API_KEY not set."});return;}
+
       const groq=new Groq({apiKey});
       await extractAudio(videoPath,audioPath);
+
       const tr=await groq.audio.transcriptions.create({
         file:fs.createReadStream(audioPath),
         model:"whisper-large-v3-turbo",
         response_format:"verbose_json",
         timestamp_granularities:["segment"],
       });
+
       type Seg={start:number;end:number;text:string;avg_logprob?:number};
       const segments:Seg[]=(tr as any).segments??[];
+
       function splitSeg(seg:Seg,conf:number){
         const text=seg.text.trim();
         if(text.length<=55)return[{start:seg.start,end:seg.end,text,confidence:conf}];
@@ -107,25 +116,25 @@ async function startServer() {
         const tpc=(seg.end-seg.start)/chunks.length;
         return chunks.map((t,i)=>({start:seg.start+i*tpc,end:seg.start+(i+1)*tpc,text:t,confidence:conf}));
       }
+
       let subtitles=segments.flatMap(seg=>{
         const conf=seg.avg_logprob?Math.min(0.99,Math.max(0.5,Math.exp(seg.avg_logprob))):0.85;
         return splitSeg(seg,conf);
       });
+
       if(targetLang!=="original"&&langName&&subtitles.length>0){
         console.log("[translate] "+subtitles.length+" lines → "+langName);
 
-        // Translate one line at a time — guaranteed correct count, no mismatch
         async function translateLine(text:string): Promise<string> {
           try {
             const r=await groq.chat.completions.create({
               model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:200,
               messages:[
-                {role:"system",content:"Translate the following subtitle line to "+langName+". Reply with ONLY the translated text. No explanations, no quotes, no punctuation changes."},
+                {role:"system",content:"Translate the following subtitle line to "+langName+". Reply with ONLY the translated text. No explanations."},
                 {role:"user",content:text},
               ],
             });
-            const t=(r.choices[0].message.content??"").trim();
-            return t||text;
+            return (r.choices[0].message.content??"").trim()||text;
           }catch{return text;}
         }
 
@@ -133,11 +142,12 @@ async function startServer() {
         for(let i=0;i<subtitles.length;i++){
           const t=await translateLine(subtitles[i].text);
           translated.push(t);
-          if(i===0)console.log("[translate] sample: '"+subtitles[i].text+"' → '"+t+"'");
+          if(i===0)console.log("[translate] '"+subtitles[i].text+"' → '"+t+"'");
         }
         subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
-        console.log("[translate] done "+translated.length+" lines");
+        console.log("[translate] done");
       }
+
       res.json({subtitles});
     }catch(err:any){
       console.error("[transcribe] "+err?.message);
@@ -145,7 +155,7 @@ async function startServer() {
     }finally{cleanup(videoPath,audioPath);}
   });
 
-  // ── RENDER ──────────────────────────────────────────────────────────────────
+  // RENDER
   app.post("/api/render", upload.single("video"), async (req,res)=>{
     const videoPath=req.file?.path??"";
     const id=uuidv4();
@@ -155,80 +165,91 @@ async function startServer() {
       if(!req.file||!req.body.subtitles){res.status(400).json({error:"Missing data."});return;}
       const subs:{start:number;end:number;text:string}[]=JSON.parse(req.body.subtitles);
       if(!subs.length){res.status(400).json({error:"No subtitles."});return;}
+
       const style=req.body.style?JSON.parse(req.body.style):{};
-      const fontSize=Number(style.fontSize??18);
-      const fontName=String(style.fontName??"Arial");
-      const primCol=String(style.primaryColor??"#FFFFFF");
-      const outCol=String(style.outlineColor??"#000000");
-      const bgOp=Number(style.bgOpacity??0);
-      const box=style.box??{x:5,y:78,w:90,h:14};
+      const fontSize  = Number(style.fontSize??18);
+      const fontName  = String(style.fontName??"Arial");
+      const primCol   = String(style.primaryColor??"#FFFFFF");
+      const outCol    = String(style.outlineColor??"#000000");
+      const bgOp      = Number(style.bgOpacity??0);
+      const box       = style.box??{x:5,y:78,w:90,h:14};
 
       const {w:VW,h:VH}=await getVideoDimensions(videoPath);
       console.log("[render] "+VW+"x"+VH+" font="+fontSize+" box="+JSON.stringify(box));
 
-      // Center of box in pixels — for \pos exact placement
-      const cx=Math.round((box.x+box.w/2)/100*VW);
-      const cy=Math.round((box.y+box.h/2)/100*VH);
-      // Left/right margins define text wrap width
-      const mL=Math.max(0,Math.round(box.x/100*VW));
-      const mR=Math.max(0,Math.round((100-box.x-box.w)/100*VW));
+      // Box dimensions in pixels (box coords are % of video)
+      const boxTopPx    = Math.round(box.y / 100 * VH);
+      const boxBottomPx = Math.round((box.y + box.h) / 100 * VH);
+      const boxCenterY  = (box.y + box.h / 2);  // % from top
+      const mL = Math.max(0, Math.round(box.x / 100 * VW));
+      const mR = Math.max(0, Math.round((100 - box.x - box.w) / 100 * VW));
 
-      const bgAlpha=Math.round((1-bgOp)*255).toString(16).padStart(2,"0").toUpperCase();
-      const bs="\\";  // single backslash — avoids all escaping confusion
-      const outline=bgOp>0?0:Math.max(1,Math.round(fontSize*0.08));
-      const bStyle=bgOp>0?4:1;
+      // NEVER use alignment=5 (MarginV ignored for it).
+      // alignment=8 top-center: text TOP at mV px from video top
+      // alignment=2 bottom-center: text BOTTOM at mV px from video bottom
+      let alignment: number;
+      let mV: number;
+      if (boxCenterY <= 50) {
+        alignment = 8;
+        mV = boxTopPx;
+      } else {
+        alignment = 2;
+        mV = Math.max(0, VH - boxBottomPx);
+      }
+      console.log("[render] align="+alignment+" mV="+mV+" mL="+mL+" mR="+mR+" boxCenterY="+boxCenterY.toFixed(1)+"%");
 
-      // Build ASS file line by line
-      const lines:string[]=[];
-      lines.push("[Script Info]");
-      lines.push("ScriptType: v4.00+");
-      lines.push("PlayResX: "+VW);
-      lines.push("PlayResY: "+VH);
-      lines.push("ScaledBorderAndShadow: yes");
-      lines.push("WrapStyle: 1");
-      lines.push("");
-      lines.push("[V4+ Styles]");
-      lines.push("Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding");
-      lines.push("Style: Default,"+fontName+","+fontSize+","+hexToAss(primCol)+","+hexToAss(primCol)+","+hexToAss(outCol)+",&H"+bgAlpha+"000000,0,0,0,0,100,100,0,0,"+bStyle+","+outline+",0,5,"+mL+","+mR+",0,1");
-      lines.push("");
-      lines.push("[Events]");
-      lines.push("Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text");
+      const bgAlpha  = Math.round((1-bgOp)*255).toString(16).padStart(2,"0").toUpperCase();
+      const outline  = bgOp>0 ? 0 : Math.max(1, Math.round(fontSize*0.08));
+      const bStyle   = bgOp>0 ? 4 : 1;
+      const bs       = "\\";  // single backslash in the written file
 
-      // Each dialogue: {\\an5\\pos(x,y)} places middle-center of text at box center
-      for(const s of subs){
-        const tag="{"+bs+"an5"+bs+"pos("+cx+","+cy+")}";
-        const txt=s.text.trim().replace(/\n/g,bs+"N");
-        lines.push("Dialogue: 0,"+toAssTime(s.start)+","+toAssTime(s.end)+",Default,,0,0,0,,"+tag+txt);
+      // Build ASS with PlayResY=VH so FontSize is in ACTUAL VIDEO PIXELS
+      const assLines: string[] = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "PlayResX: "+VW,
+        "PlayResY: "+VH,
+        "ScaledBorderAndShadow: yes",
+        "WrapStyle: 1",
+        "",
+        "[V4+ Styles]",
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+        "Style: Default,"+fontName+","+fontSize+","+hexToAss(primCol)+","+hexToAss(primCol)+","+hexToAss(outCol)+",&H"+bgAlpha+"000000,0,0,0,0,100,100,0,0,"+bStyle+","+outline+",0,"+alignment+","+mL+","+mR+","+mV+",1",
+        "",
+        "[Events]",
+        "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+      ];
+
+      for (const s of subs) {
+        const txt = s.text.trim().replace(/\n/g, bs+"N");
+        assLines.push("Dialogue: 0,"+toAssTime(s.start)+","+toAssTime(s.end)+",Default,,0,0,0,,"+txt);
       }
 
-      const assContent=lines.join("\n");
-      fs.writeFileSync(assPath,assContent,"utf8");
+      fs.writeFileSync(assPath, assLines.join("\n"), "utf8");
+      console.log("[render] ASS style line: "+assLines[9]);
+      console.log("[render] ASS first dialogue: "+assLines[assLines.length-1].slice(0,80));
 
-      // Verify first dialogue line
-      const firstDlg=lines.find(l=>l.startsWith("Dialogue:"));
-      console.log("[render] Sample ASS line: "+firstDlg);
-
-      // Windows-safe path for ffmpeg ass filter
-      const assEsc=assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
+      // Use ass filter (PlayResY=VH → FontSize is real pixels)
+      const assEsc = assPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "$1\\:");
       console.log("[render] ass path: "+assEsc);
 
       await new Promise<void>((resolve,reject)=>{
         ffmpeg(videoPath).videoCodec("libx264")
           .outputOptions(["-vf","ass='"+assEsc+"'","-preset","veryfast","-crf","23","-movflags","+faststart"])
           .audioCodec("aac").audioBitrate("128k")
-          .on("end",resolve).on("error",reject).save(outPath);
+          .on("end",resolve).on("error",(e:Error)=>reject(e)).save(outPath);
       });
 
-      console.log("[render] done");
+      console.log("[render] done → sending file");
       res.download(outPath,"subflow_export.mp4",()=>cleanup(videoPath,assPath,outPath));
     }catch(err:any){
-      console.error("[render] "+err?.message??err);
+      console.error("[render] ERROR: "+String(err?.message??err));
       cleanup(videoPath,assPath,outPath);
-      if(!res.headersSent)res.status(500).json({error:err?.message??"Render failed."});
+      if(!res.headersSent)res.status(500).json({error:String(err?.message??"Render failed.")});
     }
   });
 
-  // ── EXPORT SRT ──────────────────────────────────────────────────────────────
+  // EXPORT SRT
   app.post("/api/export/srt",(req,res)=>{
     try{
       const{subtitles}=req.body;
@@ -239,13 +260,13 @@ async function startServer() {
     }catch(e:any){res.status(500).json({error:e?.message});}
   });
 
-  // ── EXPORT VTT ──────────────────────────────────────────────────────────────
+  // EXPORT VTT
   app.post("/api/export/vtt",(req,res)=>{
     try{
       const{subtitles}=req.body;
       if(!Array.isArray(subtitles)){res.status(400).json({error:"subtitles required."});return;}
       const vtt="WEBVTT\n\n"+subtitles.map((s:any,i:number)=>
-        i+1+"\n"+toSrtTime(s.start).replace(",",".")+" --> "+toSrtTime(s.end).replace(",",".")+"\n"+s.text.trim()
+        (i+1)+"\n"+toSrtTime(s.start).replace(",",".")+" --> "+toSrtTime(s.end).replace(",",".")+"\n"+s.text.trim()
       ).join("\n\n")+"\n";
       res.setHeader("Content-Type","text/vtt; charset=utf-8");
       res.setHeader("Content-Disposition",'attachment; filename="subtitles.vtt"');
@@ -253,7 +274,7 @@ async function startServer() {
     }catch(e:any){res.status(500).json({error:e?.message});}
   });
 
-  // ── VITE ────────────────────────────────────────────────────────────────────
+  // VITE
   if(process.env.NODE_ENV!=="production"){
     const vite=await createViteServer({server:{middlewareMode:true},appType:"spa"});
     app.use(vite.middlewares);
