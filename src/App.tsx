@@ -43,42 +43,34 @@ function toTimecode(s:number){
 }
 function formatSize(b:number){return b<1024*1024?`${(b/1024).toFixed(1)} KB`:`${(b/(1024*1024)).toFixed(1)} MB`;}
 
-// ─── SubtitleBox: drag + resize, font scale passed as prop ───────────────────
-function SubtitleBox({text,style,onChange,fontScale}:{
-  text:string; style:SubStyle; onChange:(s:SubStyle)=>void; fontScale:number;
+// ─── SubtitleBox ──────────────────────────────────────────────────────────────
+function SubtitleBox({text,style,onChange,scale}:{
+  text:string;style:SubStyle;onChange:(s:SubStyle)=>void;scale:number;
 }){
   const [sel,setSel]=useState(false);
-  const boxRef=useRef<HTMLDivElement>(null);
+  const ref=useRef<HTMLDivElement>(null);
   const drag=useRef<{type:string;sx:number;sy:number;sb:SubBox}|null>(null);
 
   useEffect(()=>{
-    const fn=(e:MouseEvent)=>{
-      if(boxRef.current&&!boxRef.current.contains(e.target as Node))setSel(false);
-    };
+    const fn=(e:MouseEvent)=>{ if(ref.current&&!ref.current.contains(e.target as Node))setSel(false); };
     document.addEventListener("mousedown",fn);
     return()=>document.removeEventListener("mousedown",fn);
   },[]);
 
-  const parentSize=()=>{
-    const p=boxRef.current?.parentElement;
-    return p?{w:p.clientWidth,h:p.clientHeight}:{w:1,h:1};
-  };
+  const pSize=()=>{ const p=ref.current?.parentElement; return p?{w:p.clientWidth,h:p.clientHeight}:{w:1,h:1}; };
   const clamp=(b:SubBox):SubBox=>({
-    x:Math.max(0,Math.min(100-b.w,b.x)),
-    y:Math.max(0,Math.min(100-b.h,b.y)),
-    w:Math.max(10,Math.min(100,b.w)),
-    h:Math.max(5,Math.min(50,b.h)),
+    x:Math.max(0,Math.min(100-b.w,b.x)), y:Math.max(0,Math.min(100-b.h,b.y)),
+    w:Math.max(10,Math.min(100,b.w)),    h:Math.max(5,Math.min(50,b.h)),
   });
   const pd=(e:React.PointerEvent,type:string)=>{
-    e.stopPropagation();e.preventDefault();
-    setSel(true);
+    e.stopPropagation();e.preventDefault();setSel(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag.current={type,sx:e.clientX,sy:e.clientY,sb:{...style.box}};
   };
   const pm=(e:React.PointerEvent)=>{
     if(!drag.current)return;
-    const {type,sx,sy,sb}=drag.current;
-    const {w:pw,h:ph}=parentSize();
+    const{type,sx,sy,sb}=drag.current;
+    const{w:pw,h:ph}=pSize();
     const dx=((e.clientX-sx)/pw)*100, dy=((e.clientY-sy)/ph)*100;
     let nb={...sb};
     if(type==="move"){nb.x=sb.x+dx;nb.y=sb.y+dy;}
@@ -94,11 +86,10 @@ function SubtitleBox({text,style,onChange,fontScale}:{
   };
   const pu=()=>{drag.current=null;};
 
-  const fs=Math.max(8,Math.round(style.fontSize*fontScale));
+  const fs=Math.max(8,Math.round(style.fontSize*scale));
   const ts=style.bgOpacity===0
     ?`1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     :"none";
-
   const HANDLES=[
     {k:"nw",s:{top:-5,left:-5,cursor:"nw-resize"}},
     {k:"ne",s:{top:-5,right:-5,cursor:"ne-resize"}},
@@ -109,12 +100,9 @@ function SubtitleBox({text,style,onChange,fontScale}:{
     {k:"e",s:{right:-5,top:"50%",transform:"translateY(-50%)",cursor:"e-resize"}},
     {k:"w",s:{left:-5,top:"50%",transform:"translateY(-50%)",cursor:"w-resize"}},
   ] as const;
-
   return(
-    <div ref={boxRef}
-      style={{
-        position:"absolute",
-        left:`${style.box.x}%`,top:`${style.box.y}%`,
+    <div ref={ref} style={{
+        position:"absolute",left:`${style.box.x}%`,top:`${style.box.y}%`,
         width:`${style.box.w}%`,height:`${style.box.h}%`,
         border:sel?"2px solid #f59e0b":"1.5px dashed rgba(255,255,255,0.5)",
         borderRadius:4,zIndex:20,cursor:"move",
@@ -122,42 +110,26 @@ function SubtitleBox({text,style,onChange,fontScale}:{
         display:"flex",alignItems:"center",justifyContent:"center",
         boxSizing:"border-box",overflow:"visible",
       }}
-      onPointerDown={e=>pd(e,"move")}
-      onPointerMove={pm}
-      onPointerUp={pu}
-    >
+      onPointerDown={e=>pd(e,"move")} onPointerMove={pm} onPointerUp={pu}>
       <span style={{
-        fontFamily:style.fontName,fontSize:fs+"px",
-        color:style.primaryColor,textShadow:ts,
+        fontFamily:style.fontName,fontSize:fs+"px",color:style.primaryColor,textShadow:ts,
         background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
-        padding:style.bgOpacity>0?"2px 8px":"0",
-        borderRadius:style.bgOpacity>0?"3px":"0",
-        textAlign:"center",lineHeight:1.2,
-        maxWidth:"98%",wordBreak:"break-word",whiteSpace:"normal",
-        display:"block",pointerEvents:"none",userSelect:"none",
+        padding:style.bgOpacity>0?"2px 8px":"0",borderRadius:style.bgOpacity>0?"3px":"0",
+        textAlign:"center",lineHeight:1.2,maxWidth:"98%",wordBreak:"break-word",
+        whiteSpace:"normal",display:"block",pointerEvents:"none",userSelect:"none",
       }}>{text||"Sample text"}</span>
-
       {sel&&HANDLES.map(h=>(
-        <div key={h.k}
-          style={{position:"absolute",width:10,height:10,background:"#f59e0b",
-            border:"1.5px solid #fff",borderRadius:2,zIndex:30,...h.s as any}}
-          onPointerDown={e=>pd(e,h.k)}
-          onPointerMove={pm}
-          onPointerUp={pu}
-        />
+        <div key={h.k} style={{position:"absolute",width:10,height:10,background:"#f59e0b",
+          border:"1.5px solid #fff",borderRadius:2,zIndex:30,...h.s as any}}
+          onPointerDown={e=>pd(e,h.k)} onPointerMove={pm} onPointerUp={pu}/>
       ))}
-      {sel&&(
-        <div style={{position:"absolute",top:-20,right:0,fontSize:9,color:"rgba(255,255,255,0.7)",
-          background:"rgba(0,0,0,0.65)",padding:"2px 5px",borderRadius:3,
-          pointerEvents:"none",whiteSpace:"nowrap"}}>
-          click outside to deselect
-        </div>
-      )}
+      {sel&&<div style={{position:"absolute",top:-20,right:0,fontSize:9,color:"rgba(255,255,255,0.7)",
+        background:"rgba(0,0,0,0.65)",padding:"2px 5px",borderRadius:3,
+        pointerEvents:"none",whiteSpace:"nowrap"}}>click outside to deselect</div>}
     </div>
   );
 }
 
-// ─── Upload Zone ──────────────────────────────────────────────────────────────
 function UploadZone({onFile}:{onFile:(f:File)=>void}){
   const [drag,setDrag]=useState(false);
   const ref=useRef<HTMLInputElement>(null);
@@ -169,32 +141,22 @@ function UploadZone({onFile}:{onFile:(f:File)=>void}){
       onClick={()=>ref.current?.click()}>
       <input ref={ref} type="file" accept="video/*" style={{display:"none"}}
         onChange={e=>{const f=e.target.files?.[0];if(f)onFile(f);}}/>
-      <div className="upload-icon">
-        <svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2"/><path d="M20 20L28 24L20 28V20Z" fill="currentColor"/><path d="M4 16H44" stroke="currentColor" strokeWidth="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
-      </div>
+      <div className="upload-icon"><svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2"/><path d="M20 20L28 24L20 28V20Z" fill="currentColor"/><path d="M4 16H44" stroke="currentColor" strokeWidth="2"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="14" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></div>
       <p className="upload-title">Drop your video here</p>
       <p className="upload-sub">MP4, MOV, MKV, AVI, WebM — up to 500 MB</p>
-      <button type="button" className="btn-outline"
-        onClick={e=>{e.stopPropagation();ref.current?.click();}}>Browse files</button>
+      <button type="button" className="btn-outline" onClick={e=>{e.stopPropagation();ref.current?.click();}}>Browse files</button>
     </div>
   );
 }
 
 function ProcessingView({fileName}:{fileName:string}){
   const [dots,setDots]=useState(".");
-  useEffect(()=>{
-    const id=setInterval(()=>setDots(d=>d.length>=3?".":d+"."),600);
-    return()=>clearInterval(id);
-  },[]);
+  useEffect(()=>{const id=setInterval(()=>setDots(d=>d.length>=3?".":d+"."),600);return()=>clearInterval(id);},[]);
   return(
     <div className="processing-view">
       <div className="spinner-wrap">
-        <svg viewBox="0 0 50 50" className="spinner-ring">
-          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="94 32" strokeLinecap="round"/>
-        </svg>
-        <svg className="spinner-icon" viewBox="0 0 24 24" fill="none">
-          <path d="M9 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4M9 7V5a2 2 0 014 0v2M9 7h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        </svg>
+        <svg viewBox="0 0 50 50" className="spinner-ring"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="94 32" strokeLinecap="round"/></svg>
+        <svg className="spinner-icon" viewBox="0 0 24 24" fill="none"><path d="M9 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4M9 7V5a2 2 0 014 0v2M9 7h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
       </div>
       <p className="proc-title">Transcribing{dots}</p>
       <p className="proc-file">{fileName}</p>
@@ -207,22 +169,18 @@ function ProcessingView({fileName}:{fileName:string}){
   );
 }
 
-// ─── Right panel: Style + Subtitles tabs ─────────────────────────────────────
 function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
-  style:SubStyle; onChange:(s:SubStyle)=>void;
-  subtitles:Subtitle[]; onSubChange:(s:Subtitle[])=>void;
-  currentTime:number;
+  style:SubStyle;onChange:(s:SubStyle)=>void;
+  subtitles:Subtitle[];onSubChange:(s:Subtitle[])=>void;currentTime:number;
 }){
   const [tab,setTab]=useState<"style"|"subs">("style");
   const set=(p:Partial<SubStyle>)=>onChange({...style,...p,preset:"custom"});
   const applyPreset=(k:string)=>onChange({...style,...PRESETS[k],preset:k});
-
   const listRef=useRef<HTMLDivElement>(null);
   const activeIdx=subtitles.findIndex(s=>currentTime>=s.start&&currentTime<=s.end);
   useEffect(()=>{
-    if(activeIdx>=0&&listRef.current){
+    if(activeIdx>=0&&listRef.current)
       (listRef.current.children[activeIdx] as HTMLElement)?.scrollIntoView({block:"nearest",behavior:"smooth"});
-    }
   },[activeIdx]);
   const updT=(i:number,text:string)=>{const n=[...subtitles];n[i]={...n[i],text};onSubChange(n);};
   const updTime=(i:number,f:"start"|"end",v:string)=>{
@@ -230,7 +188,6 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
     const s=(p[0]||0)*3600+(p[1]||0)*60+(p[2]||0);
     if(!isNaN(s)){const n=[...subtitles];n[i]={...n[i],[f]:s};onSubChange(n);}
   };
-
   return(
     <div className="right-panel">
       <div className="tab-bar">
@@ -239,7 +196,6 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
           📝 Subtitles <span className="tbadge">{subtitles.length}</span>
         </button>
       </div>
-
       {tab==="style"&&(
         <div className="tab-body">
           <div className="sec-label">Preset</div>
@@ -250,12 +206,10 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
             ))}
           </div>
           <div className="divider"/>
-
           <div className="sec-label">Font</div>
           <select className="sel" value={style.fontName} onChange={e=>set({fontName:e.target.value})}>
             {FONTS.map(f=><option key={f} value={f}>{f}</option>)}
           </select>
-
           <div className="sec-label mt8">Font size <span className="val">{style.fontSize}px</span></div>
           <div className="size-row">
             <button className="size-btn" onClick={()=>set({fontSize:Math.max(10,style.fontSize-2)})}>−</button>
@@ -265,11 +219,9 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
             <span className="size-num">{style.fontSize}</span>
           </div>
           <div className="divider"/>
-
           <div className="sec-label">Text color</div>
           <div className="color-row">
-            <input type="color" className="cpick" value={style.primaryColor}
-              onChange={e=>set({primaryColor:e.target.value})}/>
+            <input type="color" className="cpick" value={style.primaryColor} onChange={e=>set({primaryColor:e.target.value})}/>
             <span className="chex">{style.primaryColor}</span>
           </div>
           <div className="chips">
@@ -279,11 +231,9 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
                 onClick={()=>set({primaryColor:c})}/>
             ))}
           </div>
-
           <div className="sec-label mt8">Outline color</div>
           <div className="color-row">
-            <input type="color" className="cpick" value={style.outlineColor}
-              onChange={e=>set({outlineColor:e.target.value})}/>
+            <input type="color" className="cpick" value={style.outlineColor} onChange={e=>set({outlineColor:e.target.value})}/>
             <span className="chex">{style.outlineColor}</span>
           </div>
           <div className="chips">
@@ -294,7 +244,6 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
             ))}
           </div>
           <div className="divider"/>
-
           <div className="sec-label">Background <span className="val">
             {style.bgOpacity===0?"off":`${Math.round(style.bgOpacity*100)}%`}
           </span></div>
@@ -302,7 +251,6 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
             onChange={e=>set({bgOpacity:Number(e.target.value)})} className="rng"/>
         </div>
       )}
-
       {tab==="subs"&&(
         <div className="tab-body no-pad">
           <div className="sub-list" ref={listRef}>
@@ -311,14 +259,11 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
                 <div className="si-n">{i+1}</div>
                 <div className="si-body">
                   <div className="si-times">
-                    <input className="tc" defaultValue={toTimecode(sub.start)}
-                      onBlur={e=>updTime(i,"start",e.target.value)}/>
+                    <input className="tc" defaultValue={toTimecode(sub.start)} onBlur={e=>updTime(i,"start",e.target.value)}/>
                     <span className="tc-arr">→</span>
-                    <input className="tc" defaultValue={toTimecode(sub.end)}
-                      onBlur={e=>updTime(i,"end",e.target.value)}/>
+                    <input className="tc" defaultValue={toTimecode(sub.end)} onBlur={e=>updTime(i,"end",e.target.value)}/>
                   </div>
-                  <textarea className="si-txt" value={sub.text}
-                    onChange={e=>updT(i,e.target.value)} rows={2}/>
+                  <textarea className="si-txt" value={sub.text} onChange={e=>updT(i,e.target.value)} rows={2}/>
                 </div>
                 <div className="si-meta">
                   <span className="cdot" style={{background:sub.confidence>0.85?"var(--grn)":sub.confidence>0.7?"var(--amb)":"var(--red)"}}/>
@@ -339,7 +284,7 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{
   const [rendering,setRendering]=useState(false);
   const [done,setDone]=useState(false);
   const dl=(url:string,name:string)=>{const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);};
-  const post=(path:string,name:string)=>fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subtitles})}).then(r=>r.blob()).then(b=>dl(URL.createObjectURL(b),name));
+  const post=(p:string,n:string)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subtitles})}).then(r=>r.blob()).then(b=>dl(URL.createObjectURL(b),n));
   const render=async()=>{
     if(!videoFile)return;setRendering(true);
     try{
@@ -357,19 +302,12 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{
   return(
     <div className="export-panel">
       <h3>Export</h3>
-      <p className="export-sub">Choose your output format</p>
+      <p className="export-sub">Choose output format</p>
       <div className="export-grid">
-        <button className="export-card" onClick={()=>post("/api/export/srt","subtitles.srt")}>
-          <span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span>
-        </button>
-        <button className="export-card" onClick={()=>post("/api/export/vtt","subtitles.vtt")}>
-          <span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span>
-        </button>
-        <button className="export-card" onClick={()=>navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"))}>
-          <span className="ei">📋</span><span className="el">Copy Text</span><span className="ed">Plain transcript</span>
-        </button>
-        <button className={`export-card accent ${rendering?"loading":""} ${done?"done":""}`}
-          onClick={render} disabled={rendering||!videoFile}>
+        <button className="export-card" onClick={()=>post("/api/export/srt","subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most players</span></button>
+        <button className="export-card" onClick={()=>post("/api/export/vtt","subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
+        <button className="export-card" onClick={()=>navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"))}><span className="ei">📋</span><span className="el">Copy Text</span><span className="ed">Transcript</span></button>
+        <button className={`export-card accent ${rendering?"loading":""} ${done?"done":""}`} onClick={render} disabled={rendering||!videoFile}>
           <span className="ei">{done?"✅":"🎬"}</span>
           <span className="el">{rendering?"Rendering…":done?"Downloaded!":"Burn to Video"}</span>
           <span className="ed">Embed subtitles into MP4</span>
@@ -380,7 +318,6 @@ function ExportPanel({subtitles,videoFile,style,onBack}:{
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App(){
   const [step,setStep]=useState<Step>("upload");
   const [videoFile,setVideoFile]=useState<File|null>(null);
@@ -390,47 +327,49 @@ export default function App(){
   const [style,setStyle]=useState<SubStyle>(DEFAULT_STYLE);
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
-
-  // Native video dimensions — used to set wrap aspect ratio and font scale
-  const [nativeSize,setNativeSize]=useState({w:0,h:0});
+  // Native video dimensions — used for aspect-ratio CSS and font scale
+  const [nativeW,setNativeW]=useState(0);
+  const [nativeH,setNativeH]=useState(0);
+  const [wrapPx,setWrapPx]=useState({w:0,h:0});
   const videoRef=useRef<HTMLVideoElement>(null);
-  const wrapRef=useRef<HTMLDivElement>(null);
+  const colRef=useRef<HTMLDivElement>(null);
 
-  // fontScale = wrap displayed height / native video height
-  // Since wrap is forced to exact video aspect ratio, no letterbox → 1:1 mapping
-  const [fontScale,setFontScale]=useState(0.25);
-  const recalcScale=useCallback(()=>{
-    const wrap=wrapRef.current;
-    if(!wrap||nativeSize.h===0)return;
-    setFontScale(wrap.clientHeight/nativeSize.h);
-  },[nativeSize]);
+  // Compute exact wrap pixel size from column dimensions + video aspect ratio
+  const recalcWrap=useCallback(()=>{
+    const col=colRef.current;
+    if(!col||nativeW===0||nativeH===0)return;
+    const maxH=col.clientHeight-36;
+    const maxW=col.clientWidth;
+    if(maxH<=0||maxW<=0)return;
+    const vAspect=nativeW/nativeH;
+    let w=maxW, h=Math.round(maxW/vAspect);
+    if(h>maxH){h=maxH;w=Math.round(maxH*vAspect);}
+    setWrapPx({w:Math.round(w),h:Math.round(h)});
+  },[nativeW,nativeH]);
+
   useEffect(()=>{
-    recalcScale();
-    const obs=new ResizeObserver(recalcScale);
-    if(wrapRef.current)obs.observe(wrapRef.current);
+    recalcWrap();
+    const obs=new ResizeObserver(recalcWrap);
+    if(colRef.current)obs.observe(colRef.current);
     return()=>obs.disconnect();
-  },[recalcScale]);
+  },[recalcWrap]);
+
+  const fontScale=wrapPx.h>0&&nativeH>0 ? wrapPx.h/nativeH : 0.2;
 
   const handleFile=useCallback((f:File)=>{
-    setVideoFile(f);
-    setVideoUrl(URL.createObjectURL(f));
-    setError(null);
-    setNativeSize({w:0,h:0});
-    setFontScale(0.25);
+    setVideoFile(f);setVideoUrl(URL.createObjectURL(f));setError(null);
+    setNativeW(0);setNativeH(0);setWrapPx({w:0,h:0});
   },[]);
 
   const startTranscription=async()=>{
-    if(!videoFile)return;
-    setStep("processing");setError(null);
+    if(!videoFile)return;setStep("processing");setError(null);
     try{
       const form=new FormData();
-      form.append("video",videoFile);
-      form.append("targetLang",targetLang);
+      form.append("video",videoFile);form.append("targetLang",targetLang);
       const res=await fetch("/api/transcribe",{method:"POST",body:form});
       const data=await res.json();
       if(!res.ok)throw new Error(data.error??"Transcription failed.");
-      setSubtitles(data.subtitles);
-      setStep("edit");
+      setSubtitles(data.subtitles);setStep("edit");
     }catch(e:any){setError(e.message??"Unknown error.");setStep("upload");}
   };
 
@@ -469,10 +408,8 @@ export default function App(){
         <main className="main">
           {step==="upload"&&(
             <div className="page-ctr fade-in">
-              <div className="hero">
-                <h1>Transcribe & translate<br/>your videos</h1>
-                <p>Powered by Whisper AI — free, fast, no subscription</p>
-              </div>
+              <div className="hero"><h1>Transcribe & translate<br/>your videos</h1>
+                <p>Powered by Whisper AI — free, fast, no subscription</p></div>
               {error&&<div className="err-banner">⚠ {error}</div>}
               <UploadZone onFile={handleFile}/>
               {videoFile&&(
@@ -482,10 +419,7 @@ export default function App(){
                       <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5"/>
                       <path d="M10 9L15 12L10 15V9Z" fill="currentColor"/>
                     </svg>
-                    <div>
-                      <p className="fname">{videoFile.name}</p>
-                      <p className="fmeta">{formatSize(videoFile.size)}</p>
-                    </div>
+                    <div><p className="fname">{videoFile.name}</p><p className="fmeta">{formatSize(videoFile.size)}</p></div>
                     <button className="clear-btn" onClick={()=>{setVideoFile(null);setVideoUrl("");}}>×</button>
                   </div>
                   <div className="fld">
@@ -511,35 +445,44 @@ export default function App(){
 
           {step==="edit"&&(
             <div className="editor-page fade-in">
-              <div className="vid-col">
-                {/* vid-wrap: fixed height + aspect-ratio = exact video shape, no black bars */}
-                <div className="vid-wrap" ref={wrapRef} style={{
-                  aspectRatio: nativeSize.w>0 ? `${nativeSize.w}/${nativeSize.h}` : "9/16",
-                  height: "min(calc(100vh - 120px), 70vw * " + (nativeSize.w>0 ? nativeSize.h/nativeSize.w : 16/9) + ")",
-                  width:"auto", maxWidth:"100%",
-                }}>
-                  <video ref={videoRef} src={videoUrl} controls className="vid-el-abs"
-                    onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-                    onLoadedMetadata={e=>{
-                      const v=e.target as HTMLVideoElement;
-                      setNativeSize({w:v.videoWidth,h:v.videoHeight});
-                      setTimeout(recalcScale,50);
-                    }}/>
-                  {/* SubtitleBox % = video % exactly — wrap has same aspect ratio as video */}
-                  <SubtitleBox
-                    text={currentSub?.text??"Sample subtitle text"}
-                    style={style}
-                    onChange={setStyle}
-                    fontScale={fontScale}
-                  />
-                </div>
+              <div className="vid-col" ref={colRef}>
+                {/* wrapPx computed in JS = exact video pixel dimensions, no black bars */}
+                {wrapPx.w>0 ? (
+                  <div style={{
+                    position:"relative",width:wrapPx.w,height:wrapPx.h,
+                    background:"#000",borderRadius:12,overflow:"hidden",flexShrink:0,
+                  }}>
+                    <video ref={videoRef} src={videoUrl} controls
+                      style={{position:"absolute",inset:0,width:"100%",height:"100%",display:"block"}}
+                      onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+                      onLoadedMetadata={e=>{
+                        const v=e.target as HTMLVideoElement;
+                        setNativeW(v.videoWidth);setNativeH(v.videoHeight);
+                        setTimeout(recalcWrap,50);
+                      }}/>
+                    {/* SubtitleBox: wrapPx=video px → % of wrap = % of video = % of ASS export */}
+                    <SubtitleBox
+                      text={currentSub?.text??"Sample subtitle text"}
+                      style={style} onChange={setStyle} fontScale={fontScale}
+                    />
+                  </div>
+                ) : (
+                  <div style={{position:"relative",width:"100%",maxWidth:400,
+                    aspectRatio:"9/16",background:"#000",borderRadius:12,overflow:"hidden"}}>
+                    <video ref={videoRef} src={videoUrl} controls
+                      style={{width:"100%",height:"100%",display:"block"}}
+                      onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+                      onLoadedMetadata={e=>{
+                        const v=e.target as HTMLVideoElement;
+                        setNativeW(v.videoWidth);setNativeH(v.videoHeight);
+                        setTimeout(recalcWrap,50);
+                      }}/>
+                  </div>
+                )}
                 <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
-              <RightPanel
-                style={style} onChange={setStyle}
-                subtitles={subtitles} onSubChange={setSubtitles}
-                currentTime={currentTime}
-              />
+              <RightPanel style={style} onChange={setStyle}
+                subtitles={subtitles} onSubChange={setSubtitles} currentTime={currentTime}/>
             </div>
           )}
 
@@ -595,8 +538,7 @@ const CSS=`
   .err-banner{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:var(--r);padding:10px 14px;color:#f87171;font-size:12px;margin-bottom:14px}
   .file-card{margin-top:14px;background:var(--s1);border:1px solid var(--brd);border-radius:var(--rl);padding:14px;display:flex;flex-direction:column;gap:11px}
   .file-row{display:flex;align-items:center;gap:10px}
-  .fname{font-weight:500;font-size:13px}
-  .fmeta{font-size:11px;color:var(--mut);font-family:'JetBrains Mono',monospace}
+  .fname{font-weight:500;font-size:13px}.fmeta{font-size:11px;color:var(--mut);font-family:'JetBrains Mono',monospace}
   .clear-btn{margin-left:auto;background:none;border:none;color:var(--mut);font-size:18px;cursor:pointer;line-height:1}
   .clear-btn:hover{color:var(--red)}
   .fld{display:flex;flex-direction:column;gap:5px}
@@ -613,12 +555,11 @@ const CSS=`
   .proc-steps{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
   .sbadge{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid var(--brd);color:var(--mut);background:var(--s1);font-family:'JetBrains Mono',monospace}
   .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
+  /* Editor */
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
-  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:6px}
-  .vid-wrap{position:relative;background:#000;border-radius:12px;overflow:hidden;flex-shrink:0}
-  .vid-el-abs{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:contain}
-
-  .drag-hint{font-size:11px;color:var(--mut)}
+  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:6px;background:var(--bg)}
+  .vid-el{max-width:100%;max-height:100%;display:block;object-fit:contain}
+  /* Right panel */
   .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
   .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
   .tab-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-size:12px;font-weight:500;padding:11px 8px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:-1px}
@@ -676,6 +617,6 @@ const CSS=`
   .export-card.loading{opacity:.6;cursor:wait}
   .export-card.done{border-color:var(--grn);background:rgba(52,211,153,0.08)}
   .ei{font-size:19px}.el{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--txt)}.ed{font-size:11px;color:var(--mut)}
-  @media(max-width:700px){.right-panel{width:260px}}
+  @media(max-width:700px){.right-panel{width:250px}}
   @media(max-width:600px){.editor-page{flex-direction:column}.vid-col{flex:none;height:55%}.right-panel{width:100%;border-left:none;border-top:1px solid var(--brd)}}
 `;
