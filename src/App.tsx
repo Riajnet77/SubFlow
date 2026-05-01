@@ -297,42 +297,45 @@ export default function App(){
   const [error,setError]=useState<string|null>(null);
   const [currentTime,setCurrentTime]=useState(0);
 
-  // Native video resolution
+  const [nativeW,setNativeW]=useState(0);
   const [nativeH,setNativeH]=useState(0);
-  // Actual rendered video rect (from getBoundingClientRect on the video element)
-  const [videoRect,setVideoRect]=useState({left:0,top:0,width:0,height:0});
+  // Exact px size of the video element (set via style, no object-fit)
+  const [dispW,setDispW]=useState(0);
+  const [dispH,setDispH]=useState(0);
 
   const videoRef=useRef<HTMLVideoElement>(null);
-  const wrapRef=useRef<HTMLDivElement>(null);
+  const colRef=useRef<HTMLDivElement>(null);
 
-  // Measure actual rendered video area inside the wrap
-  const measureVideo=useCallback(()=>{
-    const vid=videoRef.current;
-    const wrap=wrapRef.current;
-    if(!vid||!wrap)return;
-    const vr=vid.getBoundingClientRect();
-    const wr=wrap.getBoundingClientRect();
-    if(vr.width===0||vr.height===0)return;
-    setVideoRect({
-      left: vr.left - wr.left,
-      top:  vr.top  - wr.top,
-      width:  vr.width,
-      height: vr.height,
-    });
-  },[]);
+  const computeSize=useCallback(()=>{
+    const col=colRef.current;
+    if(!col||nativeW===0||nativeH===0)return;
+    const maxW=col.clientWidth-2;
+    const maxH=col.clientHeight-34;
+    if(maxW<=0||maxH<=0)return;
+    const ar=nativeW/nativeH;
+    let w=maxW, h=Math.round(maxW/ar);
+    if(h>maxH){h=maxH;w=Math.round(maxH*ar);}
+    w=Math.round(w); h=Math.round(h);
+    setDispW(w); setDispH(h);
+    // Apply directly to video element so it has exactly this size
+    if(videoRef.current){
+      videoRef.current.style.width=w+"px";
+      videoRef.current.style.height=h+"px";
+    }
+  },[nativeW,nativeH]);
 
   useEffect(()=>{
-    const obs=new ResizeObserver(()=>{ setTimeout(measureVideo,50); });
-    if(wrapRef.current) obs.observe(wrapRef.current);
-    if(videoRef.current) obs.observe(videoRef.current);
+    computeSize();
+    const obs=new ResizeObserver(()=>setTimeout(computeSize,30));
+    if(colRef.current)obs.observe(colRef.current);
     return()=>obs.disconnect();
-  },[measureVideo]);
+  },[computeSize]);
 
-  const fontScale = videoRect.height>0 && nativeH>0 ? videoRect.height/nativeH : 0.2;
+  const fontScale=dispH>0&&nativeH>0?dispH/nativeH:0.2;
 
   const handleFile=useCallback((f:File)=>{
     setVideoFile(f);setVideoUrl(URL.createObjectURL(f));setError(null);
-    setNativeH(0);setVideoRect({left:0,top:0,width:0,height:0});
+    setNativeW(0);setNativeH(0);setDispW(0);setDispH(0);
   },[]);
 
   const startTranscription=async()=>{
@@ -412,37 +415,36 @@ export default function App(){
 
           {step==="edit"&&(
             <div className="editor-page fade-in">
-              {/* VIDEO COLUMN */}
-              <div className="vid-col" ref={wrapRef} style={{position:"relative"}}>
-                {/* Video fills the column, object-fit:contain maintains AR */}
-                <video ref={videoRef} src={videoUrl} controls className="vid-el"
-                  onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-                  onLoadedMetadata={e=>{
-                    const v=e.target as HTMLVideoElement;
-                    setNativeH(v.videoHeight);
-                    setTimeout(measureVideo,100);
-                  }}
-                  onLoadedData={()=>setTimeout(measureVideo,100)}
-                />
-                {/* Overlay positioned exactly over the rendered video area */}
-                {videoRect.width>0&&(
-                  <div style={{
-                    position:"absolute",
-                    left:videoRect.left,top:videoRect.top,
-                    width:videoRect.width,height:videoRect.height,
-                    pointerEvents:"none",zIndex:10,
-                  }}>
-                    <div style={{position:"relative",width:"100%",height:"100%",pointerEvents:"all"}}>
-                      <SubtitleBox
-                        text={currentSub?.text??"Sample subtitle text"}
-                        style={style}
-                        onChange={setStyle}
-                        fontScale={fontScale}
-                      />
-                    </div>
-                  </div>
-                )}
-                <p className="drag-hint" style={{position:"absolute",bottom:4,left:0,right:0,textAlign:"center"}}>⠿ Drag box to move · drag corners to resize</p>
+              {/* VIDEO COLUMN — video element is sized exactly in JS, no object-fit */}
+              <div className="vid-col" ref={colRef}>
+                <div style={{
+                  position:"relative",
+                  width:dispW||"min(100%,360px)",
+                  height:dispH||"auto",
+                  background:"#000",
+                  borderRadius:12,
+                  overflow:"hidden",
+                  flexShrink:0,
+                }}>
+                  <video ref={videoRef} src={videoUrl} controls
+                    style={{display:"block",background:"#000"}}
+                    onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+                    onLoadedMetadata={e=>{
+                      const v=e.target as HTMLVideoElement;
+                      setNativeW(v.videoWidth);
+                      setNativeH(v.videoHeight);
+                      setTimeout(computeSize,80);
+                    }}/>
+                  {dispW>0&&(
+                    <SubtitleBox
+                      text={currentSub?.text??"Sample subtitle text"}
+                      style={style}
+                      onChange={setStyle}
+                      fontScale={fontScale}
+                    />
+                  )}
+                </div>
+                <p className="drag-hint">⠿ Drag box · drag corners to resize</p>
               </div>
 
               {/* RIGHT PANEL */}
@@ -525,8 +527,7 @@ const CSS=`
   .sbadge{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid var(--brd);color:var(--mut);background:var(--s1);font-family:'JetBrains Mono',monospace}
   .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
-  .vid-col{flex:1;min-width:0;position:relative;overflow:hidden;background:#000}
-  .vid-el{width:100%;height:100%;display:block;object-fit:contain;max-height:calc(100vh - 52px)}
+  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;gap:4px}
   .drag-hint{font-size:11px;color:var(--mut);text-align:center}
   .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
   .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
