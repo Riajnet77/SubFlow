@@ -429,7 +429,13 @@ export default function App(){
                   flexShrink:0,
                 }}>
                   <video ref={videoRef} src={videoUrl} controls
-                    style={{display:"block",background:"#000"}}
+                    style={{
+                      display:"block",
+                      width: dispW>0 ? dispW+"px" : "100%",
+                      height: dispH>0 ? dispH+"px" : "auto",
+                      maxWidth:"100%",
+                      background:"#000",
+                    }}
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
