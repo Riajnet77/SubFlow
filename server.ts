@@ -16,10 +16,7 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const UPLOAD_DIR = path.join(os.tmpdir(), "subflow_uploads");
 const WORK_DIR   = path.join(os.tmpdir(), "subflow_work");
-[UPLOAD_DIR, WORK_DIR].forEach(d => {
-  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-});
-
+[UPLOAD_DIR, WORK_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 500 * 1024 * 1024 } });
 
 function cleanup(...files: string[]) {
@@ -40,29 +37,22 @@ function hexToAss(hex: string): string {
 function toSrtTime(s: number): string {
   const ms=Math.round((s%1)*1000), ss=Math.floor(s)%60;
   const mm=Math.floor(s/60)%60, hh=Math.floor(s/3600);
-  return String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0")+","+String(ms).padStart(3,"0");
+  return `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")},${String(ms).padStart(3,"0")}`;
 }
-
 function toAssTime(s: number): string {
   const cs=Math.round((s%1)*100), ss=Math.floor(s)%60;
   const mm=Math.floor(s/60)%60, hh=Math.floor(s/3600);
-  return hh+":"+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0")+"."+String(cs).padStart(2,"0");
+  return `${hh}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}.${String(cs).padStart(2,"0")}`;
 }
-
 function buildSrt(subs:{start:number;end:number;text:string}[]): string {
-  return subs.map((s,i)=>
-    (i+1)+"\n"+toSrtTime(s.start)+" --> "+toSrtTime(s.end)+"\n"+s.text.trim()
-  ).join("\n\n")+"\n";
+  return subs.map((s,i)=>`${i+1}\n${toSrtTime(s.start)} --> ${toSrtTime(s.end)}\n${s.text.trim()}`).join("\n\n")+"\n";
 }
-
 function extractAudio(input:string, output:string): Promise<void> {
   return new Promise((resolve,reject)=>{
-    ffmpeg(input).noVideo().audioCodec("libmp3lame").audioBitrate(128)
-      .audioChannels(1).audioFrequency(16000)
+    ffmpeg(input).noVideo().audioCodec("libmp3lame").audioBitrate(128).audioChannels(1).audioFrequency(16000)
       .on("end",resolve).on("error",reject).save(output);
   });
 }
-
 function getVideoDimensions(fp:string): Promise<{w:number;h:number}> {
   return new Promise(resolve=>{
     ffmpeg.ffprobe(fp,(err:any,data:any)=>{
@@ -71,6 +61,56 @@ function getVideoDimensions(fp:string): Promise<{w:number;h:number}> {
       resolve({w:vs?.width??1080,h:vs?.height??1920});
     });
   });
+}
+
+// Build ASS file content — called with actual video dimensions
+function buildAss(
+  subs:{start:number;end:number;text:string}[],
+  opts:{vw:number;vh:number;fontName:string;fontSize:number;primCol:string;outCol:string;bgOp:number;box:{x:number;y:number;w:number;h:number}}
+): string {
+  const {vw,vh,fontName,fontSize,primCol,outCol,bgOp,box} = opts;
+
+  // PlayResX=vw, PlayResY=vh → FontSize in REAL video pixels (1:1 match with preview)
+  const boxTopPx    = Math.round(box.y / 100 * vh);
+  const boxBottomPx = Math.round((box.y + box.h) / 100 * vh);
+  const boxCenterX  = Math.round((box.x + box.w/2) / 100 * vw);
+  const mL = Math.max(0, Math.round(box.x / 100 * vw));
+  const mR = Math.max(0, Math.round((100 - box.x - box.w) / 100 * vw));
+
+  // alignment=2 bottom-center: text BOTTOM at (vh - mV) px from top
+  // Set mV so bottom of text = bottom of box
+  const mV = Math.max(0, vh - boxBottomPx);
+
+  const bgAlpha = Math.round((1-bgOp)*255).toString(16).padStart(2,"0").toUpperCase();
+  const outline = bgOp > 0 ? 0 : Math.max(1, Math.round(fontSize * 0.08));
+  const bStyle  = bgOp > 0 ? 4 : 1;
+
+  console.log(`[ass] ${vw}x${vh} font=${fontName}/${fontSize}px boxTop=${boxTopPx}px(${box.y.toFixed(0)}%) boxBottom=${boxBottomPx}px(${(box.y+box.h).toFixed(0)}%) cx=${boxCenterX} mV=${mV} mL=${mL} mR=${mR}`);
+
+  const header = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${vw}`,
+    `PlayResY: ${vh}`,
+    "ScaledBorderAndShadow: yes",
+    "WrapStyle: 1",
+    "",
+    "[V4+ Styles]",
+    "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
+    `Style: Default,${fontName},${fontSize},${hexToAss(primCol)},${hexToAss(primCol)},${hexToAss(outCol)},&H${bgAlpha}000000,0,0,0,0,100,100,0,0,${bStyle},${outline},0,2,${mL},${mR},${mV},1`,
+    "",
+    "[Events]",
+    "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+  ];
+
+  // \an2\pos(cx, boxBottomPx): bottom-center at exact box bottom pixel
+  // Both margin-based AND \pos ensure position even if one is ignored by libass
+  const events = subs.map(s => {
+    const txt = s.text.trim().replace(/\n/g, "\\N");
+    return `Dialogue: 0,${toAssTime(s.start)},${toAssTime(s.end)},Default,,0,0,0,,{\\an2\\pos(${boxCenterX},${boxBottomPx})}${txt}`;
+  });
+
+  return [...header, ...events].join("\n");
 }
 
 async function startServer() {
@@ -88,12 +128,11 @@ async function startServer() {
       const targetLang=String(req.body.targetLang??"original").trim();
       const langName=LANG_NAMES[targetLang]??"";
       const apiKey=process.env.GROQ_API_KEY;
-      console.log("[transcribe] lang="+targetLang+" ("+langName+")");
+      console.log(`[transcribe] lang=${targetLang} (${langName})`);
       if(!apiKey){res.status(500).json({error:"GROQ_API_KEY not set."});return;}
-
       const groq=new Groq({apiKey});
-      await extractAudio(videoPath,audioPath);
 
+      await extractAudio(videoPath, audioPath);
       const tr=await groq.audio.transcriptions.create({
         file:fs.createReadStream(audioPath),
         model:"whisper-large-v3-turbo",
@@ -104,10 +143,10 @@ async function startServer() {
       type Seg={start:number;end:number;text:string;avg_logprob?:number};
       const segments:Seg[]=(tr as any).segments??[];
 
-      function splitSeg(seg:Seg,conf:number){
+      function splitSeg(seg:Seg, conf:number) {
         const text=seg.text.trim();
-        if(text.length<=55)return[{start:seg.start,end:seg.end,text,confidence:conf}];
-        const words=text.split(" ");const chunks:string[]=[];let cur="";
+        if(text.length<=55) return [{start:seg.start,end:seg.end,text,confidence:conf}];
+        const words=text.split(" "); const chunks:string[]=[]; let cur="";
         for(const w of words){
           if((cur+" "+w).trim().length<=55){cur=(cur+" "+w).trim();}
           else{if(cur)chunks.push(cur);cur=w;}
@@ -122,130 +161,90 @@ async function startServer() {
         return splitSeg(seg,conf);
       });
 
-      if(targetLang!=="original"&&langName&&subtitles.length>0){
-        console.log("[translate] "+subtitles.length+" lines → "+langName);
-
-        async function translateLine(text:string): Promise<string> {
-          try {
+      // Translate line by line — guaranteed no size mismatch
+      if(targetLang!=="original" && langName && subtitles.length>0){
+        console.log(`[translate] ${subtitles.length} lines → ${langName}`);
+        const translated:string[]=[];
+        for(const sub of subtitles){
+          try{
             const r=await groq.chat.completions.create({
-              model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:200,
+              model:"llama-3.3-70b-versatile", temperature:0.1, max_tokens:200,
               messages:[
-                {role:"system",content:"Translate the following subtitle line to "+langName+". Reply with ONLY the translated text. No explanations."},
-                {role:"user",content:text},
+                {role:"system", content:`Translate to ${langName}. Reply with ONLY the translation, nothing else.`},
+                {role:"user", content:sub.text},
               ],
             });
-            return (r.choices[0].message.content??"").trim()||text;
-          }catch{return text;}
+            translated.push((r.choices[0].message.content??"").trim()||sub.text);
+          } catch { translated.push(sub.text); }
         }
-
-        const translated:string[]=[];
-        for(let i=0;i<subtitles.length;i++){
-          const t=await translateLine(subtitles[i].text);
-          translated.push(t);
-          if(i===0)console.log("[translate] '"+subtitles[i].text+"' → '"+t+"'");
+        if(translated.length===subtitles.length){
+          subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
+          console.log(`[translate] done. sample: "${translated[0]}"`);
         }
-        subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
-        console.log("[translate] done");
       }
 
       res.json({subtitles});
-    }catch(err:any){
-      console.error("[transcribe] "+err?.message);
+    } catch(err:any){
+      console.error("[transcribe]",err?.message);
       res.status(500).json({error:err?.message??"Transcription failed."});
-    }finally{cleanup(videoPath,audioPath);}
+    } finally { cleanup(videoPath,audioPath); }
   });
 
   // RENDER
   app.post("/api/render", upload.single("video"), async (req,res)=>{
     const videoPath=req.file?.path??"";
     const id=uuidv4();
-    const assPath=path.join(WORK_DIR,id+".ass");
-    const outPath=path.join(WORK_DIR,id+"_out.mp4");
+    const assPath=path.join(WORK_DIR, id+".ass");
+    const outPath=path.join(WORK_DIR, id+"_out.mp4");
     try{
       if(!req.file||!req.body.subtitles){res.status(400).json({error:"Missing data."});return;}
       const subs:{start:number;end:number;text:string}[]=JSON.parse(req.body.subtitles);
       if(!subs.length){res.status(400).json({error:"No subtitles."});return;}
 
-      const style=req.body.style?JSON.parse(req.body.style):{};
-      const fontSize  = Number(style.fontSize??18);
-      const fontName  = String(style.fontName??"Arial");
-      const primCol   = String(style.primaryColor??"#FFFFFF");
-      const outCol    = String(style.outlineColor??"#000000");
-      const bgOp      = Number(style.bgOpacity??0);
-      const box       = style.box??{x:5,y:78,w:90,h:14};
+      const style  = req.body.style ? JSON.parse(req.body.style) : {};
+      const box    = style.box ?? {x:5,y:78,w:90,h:14};
+      const {w:ffW,h:ffH} = await getVideoDimensions(videoPath);
+      // Use browser-reported native dimensions for ASS PlayRes so font scale matches preview
+      // If browser sent them, prefer those; otherwise fall back to ffprobe
+      const bW = Number(style.browserW||0);
+      const bH = Number(style.browserH||0);
+      const vw = bW>0 ? bW : ffW;
+      const vh = bH>0 ? bH : ffH;
+      console.log(`[render] ffprobe=${ffW}x${ffH} browser=${bW}x${bH} using=${vw}x${vh} fontSize=${style.fontSize} box=${JSON.stringify(box)}`);
 
-      const {w:VW,h:VH}=await getVideoDimensions(videoPath);
-      console.log("[render] "+VW+"x"+VH+" font="+fontSize+" box="+JSON.stringify(box));
+      const assContent = buildAss(subs, {
+        vw, vh,
+        fontName: String(style.fontName??"Arial"),
+        fontSize: Number(style.fontSize??18),
+        primCol:  String(style.primaryColor??"#FFFFFF"),
+        outCol:   String(style.outlineColor??"#000000"),
+        bgOp:     Number(style.bgOpacity??0),
+        box,
+      });
 
-      // Box dimensions in pixels (box coords are % of video)
-      const boxTopPx    = Math.round(box.y / 100 * VH);
-      const boxBottomPx = Math.round((box.y + box.h) / 100 * VH);
-      const boxCenterY  = (box.y + box.h / 2);  // % from top
-      const mL = Math.max(0, Math.round(box.x / 100 * VW));
-      const mR = Math.max(0, Math.round((100 - box.x - box.w) / 100 * VW));
+      fs.writeFileSync(assPath, assContent, "utf8");
 
-      // NEVER use alignment=5 (MarginV ignored for it).
-      // alignment=8 top-center: text TOP at mV px from video top
-      // alignment=2 bottom-center: text BOTTOM at mV px from video bottom
-      let alignment: number;
-      let mV: number;
-      if (boxCenterY <= 50) {
-        alignment = 8;
-        mV = boxTopPx;
-      } else {
-        alignment = 2;
-        mV = Math.max(0, VH - boxBottomPx);
-      }
-      console.log("[render] align="+alignment+" mV="+mV+" mL="+mL+" mR="+mR+" boxCenterY="+boxCenterY.toFixed(1)+"%");
+      // Log first 3 lines of [Events] for debugging
+      const evtLines = assContent.split("\n").filter(l=>l.startsWith("Dialogue:")).slice(0,2);
+      evtLines.forEach(l=>console.log("[ass]",l.slice(0,100)));
 
-      const bgAlpha  = Math.round((1-bgOp)*255).toString(16).padStart(2,"0").toUpperCase();
-      const outline  = bgOp>0 ? 0 : Math.max(1, Math.round(fontSize*0.08));
-      const bStyle   = bgOp>0 ? 4 : 1;
-      const bs       = "\\";  // single backslash in the written file
-
-      // Build ASS with PlayResY=VH so FontSize is in ACTUAL VIDEO PIXELS
-      const assLines: string[] = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        "PlayResX: "+VW,
-        "PlayResY: "+VH,
-        "ScaledBorderAndShadow: yes",
-        "WrapStyle: 1",
-        "",
-        "[V4+ Styles]",
-        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-        "Style: Default,"+fontName+","+fontSize+","+hexToAss(primCol)+","+hexToAss(primCol)+","+hexToAss(outCol)+",&H"+bgAlpha+"000000,0,0,0,0,100,100,0,0,"+bStyle+","+outline+",0,"+alignment+","+mL+","+mR+","+mV+",1",
-        "",
-        "[Events]",
-        "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
-      ];
-
-      for (const s of subs) {
-        const txt = s.text.trim().replace(/\n/g, bs+"N");
-        assLines.push("Dialogue: 0,"+toAssTime(s.start)+","+toAssTime(s.end)+",Default,,0,0,0,,"+txt);
-      }
-
-      fs.writeFileSync(assPath, assLines.join("\n"), "utf8");
-      console.log("[render] ASS style line: "+assLines[9]);
-      console.log("[render] ASS first dialogue: "+assLines[assLines.length-1].slice(0,80));
-
-      // Use ass filter (PlayResY=VH → FontSize is real pixels)
-      const assEsc = assPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "$1\\:");
-      console.log("[render] ass path: "+assEsc);
+      // Windows-safe path escaping for ffmpeg ass filter
+      const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
+      console.log("[render] ass="+assEsc);
 
       await new Promise<void>((resolve,reject)=>{
         ffmpeg(videoPath).videoCodec("libx264")
-          .outputOptions(["-vf","ass='"+assEsc+"'","-preset","veryfast","-crf","23","-movflags","+faststart"])
+          .outputOptions(["-vf",`ass='${assEsc}'`,"-preset","veryfast","-crf","23","-movflags","+faststart"])
           .audioCodec("aac").audioBitrate("128k")
-          .on("end",resolve).on("error",(e:Error)=>reject(e)).save(outPath);
+          .on("end",resolve).on("error",reject).save(outPath);
       });
 
-      console.log("[render] done → sending file");
+      console.log("[render] done");
       res.download(outPath,"subflow_export.mp4",()=>cleanup(videoPath,assPath,outPath));
-    }catch(err:any){
-      console.error("[render] ERROR: "+String(err?.message??err));
+    } catch(err:any){
+      console.error("[render]",err?.message??err);
       cleanup(videoPath,assPath,outPath);
-      if(!res.headersSent)res.status(500).json({error:String(err?.message??"Render failed.")});
+      if(!res.headersSent) res.status(500).json({error:err?.message??"Render failed."});
     }
   });
 
@@ -266,7 +265,7 @@ async function startServer() {
       const{subtitles}=req.body;
       if(!Array.isArray(subtitles)){res.status(400).json({error:"subtitles required."});return;}
       const vtt="WEBVTT\n\n"+subtitles.map((s:any,i:number)=>
-        (i+1)+"\n"+toSrtTime(s.start).replace(",",".")+" --> "+toSrtTime(s.end).replace(",",".")+"\n"+s.text.trim()
+        `${i+1}\n${toSrtTime(s.start).replace(",",".")} --> ${toSrtTime(s.end).replace(",",".")}\n${s.text.trim()}`
       ).join("\n\n")+"\n";
       res.setHeader("Content-Type","text/vtt; charset=utf-8");
       res.setHeader("Content-Disposition",'attachment; filename="subtitles.vtt"');
@@ -274,7 +273,6 @@ async function startServer() {
     }catch(e:any){res.status(500).json({error:e?.message});}
   });
 
-  // VITE
   if(process.env.NODE_ENV!=="production"){
     const vite=await createViteServer({server:{middlewareMode:true},appType:"spa"});
     app.use(vite.middlewares);
@@ -283,6 +281,6 @@ async function startServer() {
     app.use(express.static(dist));
     app.get(/^(?!\/api\/).*$/,(_req,res)=>res.sendFile(path.join(dist,"index.html")));
   }
-  app.listen(PORT,"0.0.0.0",()=>console.log("\n🎬 SubFlow → http://localhost:"+PORT+"\n"));
+  app.listen(PORT,"0.0.0.0",()=>console.log(`\n🎬 SubFlow → http://localhost:${PORT}\n`));
 }
 startServer().catch(e=>{console.error("Server failed:",e);process.exit(1);});
