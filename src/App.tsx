@@ -309,15 +309,17 @@ export default function App(){
   const computeSize=useCallback(()=>{
     const col=colRef.current;
     if(!col||nativeW===0||nativeH===0)return;
-    const maxW=col.clientWidth-2;
-    const maxH=col.clientHeight-34;
+    // Use getBoundingClientRect for reliable dimensions in flex layout
+    const rect=col.getBoundingClientRect();
+    const maxW=Math.floor(rect.width)-2;
+    const maxH=Math.floor(rect.height)-34;
     if(maxW<=0||maxH<=0)return;
     const ar=nativeW/nativeH;
     let w=maxW, h=Math.round(maxW/ar);
     if(h>maxH){h=maxH;w=Math.round(maxH*ar);}
     w=Math.round(w); h=Math.round(h);
+    console.log("[computeSize] col="+Math.round(rect.width)+"x"+Math.round(rect.height)+" native="+nativeW+"x"+nativeH+" disp="+w+"x"+h+" fontScale="+(h/nativeH).toFixed(4));
     setDispW(w); setDispH(h);
-    // Apply directly to video element so it has exactly this size
     if(videoRef.current){
       videoRef.current.style.width=w+"px";
       videoRef.current.style.height=h+"px";
