@@ -299,45 +299,31 @@ export default function App(){
 
   const [nativeW,setNativeW]=useState(0);
   const [nativeH,setNativeH]=useState(0);
-  // Exact px size of the video element (set via style, no object-fit)
-  const [dispW,setDispW]=useState(0);
   const [dispH,setDispH]=useState(0);
-
   const videoRef=useRef<HTMLVideoElement>(null);
-  const colRef=useRef<HTMLDivElement>(null);
 
-  const computeSize=useCallback(()=>{
-    const col=colRef.current;
-    if(!col||nativeW===0||nativeH===0)return;
-    // Use getBoundingClientRect for reliable dimensions in flex layout
-    const rect=col.getBoundingClientRect();
-    const maxW=Math.floor(rect.width)-2;
-    const maxH=Math.floor(rect.height)-34;
-    if(maxW<=0||maxH<=0)return;
-    const ar=nativeW/nativeH;
-    let w=maxW, h=Math.round(maxW/ar);
-    if(h>maxH){h=maxH;w=Math.round(maxH*ar);}
-    w=Math.round(w); h=Math.round(h);
-    console.log("[computeSize] col="+Math.round(rect.width)+"x"+Math.round(rect.height)+" native="+nativeW+"x"+nativeH+" disp="+w+"x"+h+" fontScale="+(h/nativeH).toFixed(4));
-    setDispW(w); setDispH(h);
-    if(videoRef.current){
-      videoRef.current.style.width=w+"px";
-      videoRef.current.style.height=h+"px";
+  // After video renders, measure its actual display height
+  const measureH=useCallback(()=>{
+    const v=videoRef.current;
+    if(!v)return;
+    const h=v.getBoundingClientRect().height;
+    if(h>0){
+      setDispH(h);
+      console.log("[measure] videoH="+h+" nativeH="+nativeH+" fontScale="+(h/nativeH).toFixed(4));
     }
-  },[nativeW,nativeH]);
+  },[nativeH]);
 
   useEffect(()=>{
-    computeSize();
-    const obs=new ResizeObserver(()=>setTimeout(computeSize,30));
-    if(colRef.current)obs.observe(colRef.current);
+    const obs=new ResizeObserver(()=>setTimeout(measureH,50));
+    if(videoRef.current)obs.observe(videoRef.current);
     return()=>obs.disconnect();
-  },[computeSize]);
+  },[measureH]);
 
   const fontScale=dispH>0&&nativeH>0?dispH/nativeH:0.2;
 
   const handleFile=useCallback((f:File)=>{
     setVideoFile(f);setVideoUrl(URL.createObjectURL(f));setError(null);
-    setNativeW(0);setNativeH(0);setDispW(0);setDispH(0);
+    setNativeW(0);setNativeH(0);setDispH(0);
   },[]);
 
   const startTranscription=async()=>{
@@ -417,42 +403,38 @@ export default function App(){
 
           {step==="edit"&&(
             <div className="editor-page fade-in">
-              {/* VIDEO COLUMN — video element is sized exactly in JS, no object-fit */}
-              <div className="vid-col" ref={colRef}>
-                <div style={{
-                  position:"relative",
-                  width:dispW||"min(100%,360px)",
-                  height:dispH||"auto",
-                  background:"#000",
-                  borderRadius:12,
-                  overflow:"hidden",
-                  flexShrink:0,
-                }}>
+              {/* VIDEO COLUMN — video is width:auto, browser sets natural size, we measure it */}
+              <div className="vid-col">
+                <div style={{position:"relative",display:"inline-block",flexShrink:0,borderRadius:12,overflow:"hidden",background:"#000"}}>
                   <video ref={videoRef} src={videoUrl} controls
                     style={{
                       display:"block",
-                      width: dispW>0 ? dispW+"px" : "100%",
-                      height: dispH>0 ? dispH+"px" : "auto",
-                      maxWidth:"100%",
-                      background:"#000",
+                      maxHeight:"calc(100vh - 90px)",
+                      maxWidth:"min(calc(100vw - 310px), 100%)",
+                      width:"auto",
+                      height:"auto",
                     }}
                     onTimeUpdate={e=>setCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     onLoadedMetadata={e=>{
                       const v=e.target as HTMLVideoElement;
                       setNativeW(v.videoWidth);
                       setNativeH(v.videoHeight);
-                      setTimeout(computeSize,80);
-                    }}/>
-                  {dispW>0&&(
-                    <SubtitleBox
-                      text={currentSub?.text??"Sample subtitle text"}
-                      style={style}
-                      onChange={setStyle}
-                      fontScale={fontScale}
-                    />
-                  )}
+                      setTimeout(measureH,100);
+                    }}
+                    onLoadedData={()=>setTimeout(measureH,100)}
+                  />
+                  {/* Debug overlay */}
+                  <div style={{position:"absolute",top:2,left:2,background:"rgba(0,0,0,0.7)",color:"#f59e0b",fontSize:9,padding:"2px 5px",borderRadius:3,pointerEvents:"none",fontFamily:"monospace"}}>
+                    {nativeW}x{nativeH} → disp:{Math.round(dispH*nativeW/nativeH)||"?"}x{Math.round(dispH)||"?"} scale:{fontScale.toFixed(3)}
+                  </div>
+                  <SubtitleBox
+                    text={currentSub?.text??"Sample subtitle text"}
+                    style={style}
+                    onChange={setStyle}
+                    fontScale={fontScale}
+                  />
                 </div>
-                <p className="drag-hint">⠿ Drag box · drag corners to resize</p>
+                <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
 
               {/* RIGHT PANEL */}
