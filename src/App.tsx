@@ -256,7 +256,7 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
   );
 }
 
-function ExportPanel({subtitles,videoFile,style,onBack}:{subtitles:Subtitle[];videoFile:File|null;style:SubStyle;onBack:()=>void;}){
+function ExportPanel({subtitles,videoFile,style,onBack,nativeW,nativeH}:{subtitles:Subtitle[];videoFile:File|null;style:SubStyle;onBack:()=>void;nativeW:number;nativeH:number;}){
   const [rendering,setRendering]=useState(false);
   const [done,setDone]=useState(false);
   const dl=(url:string,name:string)=>{const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);};
@@ -423,10 +423,7 @@ export default function App(){
                     }}
                     onLoadedData={()=>setTimeout(measureH,100)}
                   />
-                  {/* Debug overlay */}
-                  <div style={{position:"absolute",top:2,left:2,background:"rgba(0,0,0,0.7)",color:"#f59e0b",fontSize:9,padding:"2px 5px",borderRadius:3,pointerEvents:"none",fontFamily:"monospace"}}>
-                    {nativeW}x{nativeH} → disp:{Math.round(dispH*nativeW/nativeH)||"?"}x{Math.round(dispH)||"?"} scale:{fontScale.toFixed(3)}
-                  </div>
+
                   <SubtitleBox
                     text={currentSub?.text??"Sample subtitle text"}
                     style={style}
@@ -448,7 +445,7 @@ export default function App(){
 
           {step==="export"&&(
             <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={style} onBack={()=>setStep("edit")}/>
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={style} onBack={()=>setStep("edit")} nativeW={nativeW} nativeH={nativeH}/>
             </div>
           )}
         </main>
