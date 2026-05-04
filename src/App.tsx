@@ -11,28 +11,69 @@ type Step = "upload"|"processing"|"edit"|"export";
 
 const LANGUAGES = [
   {code:"original",label:"Original (no translation)"},
-  {code:"en",label:"English"},{code:"pt",label:"Portuguese"},
-  {code:"es",label:"Spanish"},{code:"fr",label:"French"},
-  {code:"de",label:"German"},{code:"it",label:"Italian"},
-  {code:"ja",label:"Japanese"},{code:"ko",label:"Korean"},
-  {code:"zh",label:"Chinese"},{code:"ru",label:"Russian"},
-  {code:"ar",label:"Arabic"},{code:"hi",label:"Hindi"},
+  {code:"en",label:"🇺🇸 English"},
+  {code:"pt",label:"🇧🇷 Portuguese"},
+  {code:"es",label:"🇪🇸 Spanish"},
+  {code:"fr",label:"🇫🇷 French"},
+  {code:"de",label:"🇩🇪 German"},
+  {code:"it",label:"🇮🇹 Italian"},
+  {code:"ja",label:"🇯🇵 Japanese"},
+  {code:"ko",label:"🇰🇷 Korean"},
+  {code:"zh",label:"🇨🇳 Chinese"},
+  {code:"ru",label:"🇷🇺 Russian"},
+  {code:"ar",label:"🇸🇦 Arabic"},
+  {code:"hi",label:"🇮🇳 Hindi"},
+  {code:"nl",label:"🇳🇱 Dutch"},
+  {code:"pl",label:"🇵🇱 Polish"},
+  {code:"tr",label:"🇹🇷 Turkish"},
+  {code:"sv",label:"🇸🇪 Swedish"},
+  {code:"da",label:"🇩🇰 Danish"},
+  {code:"fi",label:"🇫🇮 Finnish"},
+  {code:"no",label:"🇳🇴 Norwegian"},
+  {code:"uk",label:"🇺🇦 Ukrainian"},
+  {code:"he",label:"🇮🇱 Hebrew"},
+  {code:"th",label:"🇹🇭 Thai"},
+  {code:"vi",label:"🇻🇳 Vietnamese"},
+  {code:"id",label:"🇮🇩 Indonesian"},
+  {code:"ms",label:"🇲🇾 Malay"},
+  {code:"ro",label:"🇷🇴 Romanian"},
+  {code:"hu",label:"🇭🇺 Hungarian"},
+  {code:"cs",label:"🇨🇿 Czech"},
+  {code:"el",label:"🇬🇷 Greek"},
 ];
 const FONTS = ["Arial","Impact","Georgia","Verdana","Trebuchet MS","Tahoma","Courier New"];
 const PRESETS: Record<string,Partial<SubStyle>> = {
-  impact:  {fontName:"Impact", fontSize:26,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0},
-  bold:    {fontName:"Impact", fontSize:30,primaryColor:"#FFFF00",outlineColor:"#000000",bgOpacity:0},
-  neon:    {fontName:"Arial",  fontSize:22,primaryColor:"#00FFFF",outlineColor:"#0055FF",bgOpacity:0},
-  fire:    {fontName:"Impact", fontSize:24,primaryColor:"#FF4500",outlineColor:"#FFD700",bgOpacity:0},
-  cinema:  {fontName:"Georgia",fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.7},
-  minimal: {fontName:"Arial",  fontSize:16,primaryColor:"#FFFFFF",outlineColor:"#222222",bgOpacity:0},
-  classic: {fontName:"Arial",  fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.5},
+  impact:   {fontName:"Impact",  fontSize:26,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0},
+  bold:     {fontName:"Impact",  fontSize:30,primaryColor:"#FFFF00",outlineColor:"#000000",bgOpacity:0},
+  neon:     {fontName:"Arial",   fontSize:22,primaryColor:"#00FFFF",outlineColor:"#0055FF",bgOpacity:0},
+  fire:     {fontName:"Impact",  fontSize:26,primaryColor:"#FF4500",outlineColor:"#FFD700",bgOpacity:0},
+  ice:      {fontName:"Arial",   fontSize:20,primaryColor:"#E0F7FF",outlineColor:"#0099CC",bgOpacity:0.25},
+  cinema:   {fontName:"Georgia", fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.75},
+  minimal:  {fontName:"Arial",   fontSize:16,primaryColor:"#FFFFFF",outlineColor:"#222222",bgOpacity:0},
+  classic:  {fontName:"Arial",   fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.55},
+  karaoke:  {fontName:"Impact",  fontSize:28,primaryColor:"#FFFF00",outlineColor:"#FF6600",bgOpacity:0},
+  shadow:   {fontName:"Impact",  fontSize:26,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0},
+  pink:     {fontName:"Arial",   fontSize:22,primaryColor:"#FF69B4",outlineColor:"#880033",bgOpacity:0},
+  matrix:   {fontName:"Courier New",fontSize:18,primaryColor:"#00FF00",outlineColor:"#003300",bgOpacity:0},
+  retro:    {fontName:"Impact",  fontSize:24,primaryColor:"#FFA500",outlineColor:"#8B4513",bgOpacity:0},
+  elegant:  {fontName:"Georgia", fontSize:20,primaryColor:"#FFD700",outlineColor:"#8B6914",bgOpacity:0},
+  purple:   {fontName:"Impact",  fontSize:24,primaryColor:"#CC99FF",outlineColor:"#330066",bgOpacity:0},
+  green:    {fontName:"Arial",   fontSize:20,primaryColor:"#00FF88",outlineColor:"#006633",bgOpacity:0},
+  darkbox:  {fontName:"Arial",   fontSize:18,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0.85},
+  whitebox: {fontName:"Arial",   fontSize:18,primaryColor:"#000000",outlineColor:"#FFFFFF",bgOpacity:0.9},
+  reels:    {fontName:"Impact",  fontSize:28,primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0},
 };
 const PRESET_LIST=[
-  {key:"impact",label:"Impact",emoji:"💥"},{key:"bold",label:"Bold",emoji:"⚡"},
-  {key:"neon",label:"Neon",emoji:"🌀"},{key:"fire",label:"Fire",emoji:"🔥"},
-  {key:"cinema",label:"Cinema",emoji:"🎬"},{key:"minimal",label:"Minimal",emoji:"◻️"},
-  {key:"classic",label:"Classic",emoji:"📺"},
+  {key:"impact",  label:"Impact",   emoji:"💥"},{key:"bold",     label:"Bold",     emoji:"⚡"},
+  {key:"neon",    label:"Neon",     emoji:"🌀"},{key:"fire",     label:"Fire",     emoji:"🔥"},
+  {key:"ice",     label:"Ice",      emoji:"❄️"},{key:"cinema",   label:"Cinema",   emoji:"🎬"},
+  {key:"classic", label:"Classic",  emoji:"📺"},{key:"minimal",  label:"Minimal",  emoji:"◻️"},
+  {key:"karaoke", label:"Karaoke",  emoji:"🎤"},{key:"shadow",   label:"Shadow",   emoji:"🌑"},
+  {key:"pink",    label:"Pink",     emoji:"🩷"},{key:"matrix",   label:"Matrix",   emoji:"💻"},
+  {key:"retro",   label:"Retro",    emoji:"📼"},{key:"elegant",  label:"Elegant",  emoji:"✨"},
+  {key:"purple",  label:"Purple",   emoji:"🟣"},{key:"green",    label:"Green",    emoji:"💚"},
+  {key:"darkbox", label:"Dark Box", emoji:"⬛"},{key:"whitebox", label:"White Box",emoji:"⬜"},
+  {key:"reels",   label:"Reels",    emoji:"🎞️"},
 ];
 const DEFAULT_BOX: SubBox = {x:5,y:78,w:90,h:14};
 const DEFAULT_STYLE: SubStyle = {fontSize:26,fontName:"Impact",primaryColor:"#FFFFFF",outlineColor:"#000000",bgOpacity:0,preset:"impact",box:DEFAULT_BOX};
@@ -209,19 +250,19 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
           <div className="sec-label mt8">Font size <span className="val">{style.fontSize}px</span></div>
           <div className="size-row">
             <button className="size-btn" onClick={()=>set({fontSize:Math.max(10,style.fontSize-2)})}>−</button>
-            <input type="range" min={10} max={72} value={style.fontSize} onChange={e=>set({fontSize:Number(e.target.value)})} className="rng"/>
-            <button className="size-btn" onClick={()=>set({fontSize:Math.min(72,style.fontSize+2)})}>+</button>
+            <input type="range" min={10} max={120} value={style.fontSize} onChange={e=>set({fontSize:Number(e.target.value)})} className="rng"/>
+            <button className="size-btn" onClick={()=>set({fontSize:Math.min(120,style.fontSize+2)})}>+</button>
             <span className="size-num">{style.fontSize}</span>
           </div>
           <div className="divider"/>
           <div className="sec-label">Text color</div>
           <div className="color-row"><input type="color" className="cpick" value={style.primaryColor} onChange={e=>set({primaryColor:e.target.value})}/><span className="chex">{style.primaryColor}</span></div>
-          <div className="chips">{["#FFFFFF","#FFFF00","#00FFFF","#FF4500","#FF69B4","#000000"].map(c=>(
-            <button key={c} className={`chip ${style.primaryColor===c?"on":""}`} style={{background:c,border:["#FFFFFF","#FFFF00"].includes(c)?"1px solid #555":"none"}} onClick={()=>set({primaryColor:c})}/>
+          <div className="chips">{["#FFFFFF","#FFFF00","#00FFFF","#FF4500","#FF69B4","#CC44FF","#00FF41","#FFD700","#FF6B6B","#4ECDC4","#000000","#1a1a2e"].map(c=>(
+            <button key={c} className={`chip ${style.primaryColor===c?"on":""}`} style={{background:c,border:["#FFFFFF","#FFFF00","#87CEEB","#00FF88"].includes(c)?"1px solid #555":"none"}} onClick={()=>set({primaryColor:c})}/>
           ))}</div>
           <div className="sec-label mt8">Outline color</div>
           <div className="color-row"><input type="color" className="cpick" value={style.outlineColor} onChange={e=>set({outlineColor:e.target.value})}/><span className="chex">{style.outlineColor}</span></div>
-          <div className="chips">{["#000000","#FFFFFF","#0055FF","#FFD700","#FF4500"].map(c=>(
+          <div className="chips">{["#000000","#FFFFFF","#0055FF","#FFD700","#FF4500","#8B0057","#003B00","#330066","#7B4F00","#0088CC"].map(c=>(
             <button key={c} className={`chip ${style.outlineColor===c?"on":""}`} style={{background:c,border:c==="#FFFFFF"?"1px solid #555":"none"}} onClick={()=>set({outlineColor:c})}/>
           ))}</div>
           <div className="divider"/>
@@ -516,34 +557,34 @@ const CSS=`
   .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
   .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;gap:4px}
   .drag-hint{font-size:11px;color:var(--mut);text-align:center}
-  .right-panel{width:290px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
+  .right-panel{width:380px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
   .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
-  .tab-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-size:12px;font-weight:500;padding:11px 8px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:-1px}
+  .tab-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-size:14px;font-weight:500;padding:13px 8px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:-1px}
   .tab-btn.on{color:var(--amb);border-bottom-color:var(--amb)}
   .tbadge{background:var(--s2);border:1px solid var(--brd);border-radius:20px;font-family:'JetBrains Mono',monospace;font-size:9px;padding:1px 6px;color:var(--mut)}
-  .tab-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+  .tab-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
   .tab-body.no-pad{padding:0;flex:1;overflow:hidden;display:flex;flex-direction:column}
   .tab-body::-webkit-scrollbar{width:3px}
   .tab-body::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
-  .sec-label{font-size:10px;color:var(--mut);font-weight:500;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+  .sec-label{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.04em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
   .sec-label.mt8{margin-top:4px}
-  .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:10px}
+  .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:12px}
   .presets-wrap{display:flex;flex-wrap:wrap;gap:5px}
-  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:11px;padding:4px 10px;cursor:pointer;transition:all .2s;white-space:nowrap}
+  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:13px;padding:6px 12px;cursor:pointer;transition:all .2s;white-space:nowrap}
   .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .divider{height:1px;background:var(--brd);margin:4px 0}
-  .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:12px;padding:7px 9px;cursor:pointer;outline:none;width:100%}
+  .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:14px;padding:9px 11px;cursor:pointer;outline:none;width:100%}
   .sel:focus{border-color:var(--amb)}
   .size-row{display:flex;align-items:center;gap:6px}
-  .size-btn{background:var(--s2);border:1px solid var(--brd);border-radius:6px;color:var(--txt);font-size:16px;width:26px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
+  .size-btn{background:var(--s2);border:1px solid var(--brd);border-radius:6px;color:var(--txt);font-size:20px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
   .size-btn:hover{border-color:var(--amb);color:var(--amb)}
-  .size-num{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--amb);min-width:26px;text-align:center;flex-shrink:0}
+  .size-num{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--amb);min-width:32px;text-align:center;flex-shrink:0}
   .rng{flex:1;accent-color:var(--amb);cursor:pointer}
   .color-row{display:flex;align-items:center;gap:7px}
-  .cpick{width:26px;height:26px;border:none;background:none;cursor:pointer;padding:0;border-radius:5px;flex-shrink:0}
+  .cpick{width:34px;height:34px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px;flex-shrink:0}
   .chex{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--mut)}
   .chips{display:flex;gap:5px;margin-top:3px}
-  .chip{width:18px;height:18px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
+  .chip{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
   .chip.on{border-color:var(--amb);transform:scale(1.2)}
   .sub-list{flex:1;overflow-y:auto}
   .sub-list::-webkit-scrollbar{width:3px}
@@ -573,6 +614,6 @@ const CSS=`
   .export-card.loading{opacity:.6;cursor:wait}
   .export-card.done{border-color:var(--grn);background:rgba(52,211,153,0.08)}
   .ei{font-size:19px}.el{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--txt)}.ed{font-size:11px;color:var(--mut)}
-  @media(max-width:700px){.right-panel{width:250px}}
+  @media(max-width:900px){.right-panel{width:300px}}
   @media(max-width:600px){.editor-page{flex-direction:column}.vid-col{flex:none;height:55%}.right-panel{width:100%;border-left:none;border-top:1px solid var(--brd)}}
 `;
