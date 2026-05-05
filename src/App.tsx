@@ -297,6 +297,22 @@ function RightPanel({style,onChange,subtitles,onSubChange,currentTime}:{
   );
 }
 
+function CopyButton({subtitles}:{subtitles:Subtitle[]}){
+  const [copied,setCopied]=useState(false);
+  const copy=()=>{
+    navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"));
+    setCopied(true);
+    setTimeout(()=>setCopied(false),2000);
+  };
+  return(
+    <button className={`export-card ${copied?"done":""}`} onClick={copy}>
+      <span className="ei">{copied?"✅":"📋"}</span>
+      <span className="el">{copied?"Copied!":"Copy Text"}</span>
+      <span className="ed">{copied?"Text in clipboard":"Plain transcript"}</span>
+    </button>
+  );
+}
+
 function ExportPanel({subtitles,videoFile,style,onBack,nativeW,nativeH}:{subtitles:Subtitle[];videoFile:File|null;style:SubStyle;onBack:()=>void;nativeW:number;nativeH:number;}){
   const [rendering,setRendering]=useState(false);
   const [done,setDone]=useState(false);
@@ -317,7 +333,7 @@ function ExportPanel({subtitles,videoFile,style,onBack,nativeW,nativeH}:{subtitl
       <div className="export-grid">
         <button className="export-card" onClick={()=>post("/api/export/srt","subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
         <button className="export-card" onClick={()=>post("/api/export/vtt","subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
-        <button className="export-card" onClick={()=>navigator.clipboard.writeText(subtitles.map(s=>s.text).join("\n"))}><span className="ei">📋</span><span className="el">Copy Text</span><span className="ed">Plain transcript</span></button>
+        <CopyButton subtitles={subtitles}/>
         <button className={`export-card accent ${rendering?"loading":""} ${done?"done":""}`} onClick={render} disabled={rendering||!videoFile}>
           <span className="ei">{done?"✅":"🎬"}</span><span className="el">{rendering?"Rendering…":done?"Downloaded!":"Burn to Video"}</span><span className="ed">Embed subtitles into MP4</span>
         </button>
@@ -589,17 +605,17 @@ const CSS=`
   .sub-list{flex:1;overflow-y:auto}
   .sub-list::-webkit-scrollbar{width:3px}
   .sub-list::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
-  .sub-item{display:grid;grid-template-columns:20px 1fr auto;gap:4px 7px;padding:8px 10px;border-bottom:1px solid var(--brd);transition:background .15s}
+  .sub-item{display:grid;grid-template-columns:24px 1fr auto;gap:5px 8px;padding:10px 12px;border-bottom:1px solid var(--brd);transition:background .15s}
   .sub-item:last-child{border-bottom:none}
   .sub-item:hover{background:rgba(255,255,255,0.02)}
   .sub-item.hi{background:var(--amd);border-left:2px solid var(--amb)}
-  .si-n{grid-row:1/3;align-self:center;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--mut);text-align:center}
+  .si-n{grid-row:1/3;align-self:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);text-align:center}
   .si-body{display:flex;flex-direction:column;gap:3px}
-  .si-times{display:flex;align-items:center;gap:3px}
-  .tc{background:var(--s2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 5px;width:82px;outline:none}
+  .si-times{display:flex;align-items:center;gap:4px;margin-bottom:3px}
+  .tc{background:var(--s2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 7px;width:90px;outline:none}
   .tc:focus{border-color:var(--amb)}
   .tc-arr{color:var(--mut);font-size:9px}
-  .si-txt{background:transparent;border:none;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:12px;resize:none;outline:none;width:100%;line-height:1.4;padding:0}
+  .si-txt{background:transparent;border:none;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:14px;resize:none;outline:none;width:100%;line-height:1.5;padding:0}
   .si-meta{grid-row:1/3;align-self:center;display:flex;flex-direction:column;align-items:center;gap:5px}
   .cdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
   .del-btn{background:none;border:none;color:var(--mut);font-size:14px;cursor:pointer;transition:color .2s;line-height:1}
