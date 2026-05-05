@@ -155,13 +155,14 @@ function SubtitleBox({text,style,onChange,fontScale}:{
       }}
       onPointerDown={e=>pd(e,"move")} onPointerMove={pm} onPointerUp={pu}
     >
-      <span style={{
+      {text&&<span style={{
         fontFamily:style.fontName,fontSize:fs+"px",color:style.primaryColor,textShadow:ts,
         background:style.bgOpacity>0?`rgba(0,0,0,${style.bgOpacity})`:"transparent",
         padding:style.bgOpacity>0?"2px 8px":"0",borderRadius:style.bgOpacity>0?"3px":"0",
         textAlign:"center",lineHeight:1.2,maxWidth:"98%",wordBreak:"break-word",
         whiteSpace:"normal",display:"block",pointerEvents:"none",userSelect:"none",
-      }}>{text||"Sample text"}</span>
+      }}>{text}</span>}
+      {!text&&<span style={{fontSize:10,color:"rgba(255,255,255,0.4)",pointerEvents:"none",userSelect:"none",fontFamily:"monospace"}}>subtitle area</span>}
       {sel&&HANDLES.map(h=>(
         <div key={h.k}
           style={{position:"absolute",width:10,height:10,background:"#f59e0b",
@@ -482,7 +483,7 @@ export default function App(){
                   />
 
                   <SubtitleBox
-                    text={currentSub?.text??"Sample subtitle text"}
+                    text={currentSub?.text??""}
                     style={style}
                     onChange={setStyle}
                     fontScale={fontScale}
