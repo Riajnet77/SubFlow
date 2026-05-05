@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import multer from "multer";
 import ffmpeg from "fluent-ffmpeg";
@@ -272,6 +271,8 @@ async function startServer() {
   });
 
   if(process.env.NODE_ENV!=="production"){
+    // In dev mode, dynamically import Vite to avoid bundling it
+    const {createServer:createViteServer}=await import("vite");
     const vite=await createViteServer({server:{middlewareMode:true},appType:"spa"});
     app.use(vite.middlewares);
   }else{
