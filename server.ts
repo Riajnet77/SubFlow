@@ -183,10 +183,10 @@ async function startServer() {
     try {
       if (!req.file) return res.status(400).json({ error: 'Video file is required' });
 
-      const targetLang = req.body.targetLang || 'English';
+      const targetLang = req.body.targetLang || 'original';
       const id = uuidv4();
       const inputPath = req.file.path;
-      // Use lower bitrate — Gemini doesn't need hi-fi audio; halves extraction time
+      // 64 kbps / 16 kHz mono — Whisper sweet spot, half the data vs 128 kbps stereo
       const audioPath = `/tmp/${id}_audio.mp3`;
       tmpFiles.push(inputPath, audioPath);
 
@@ -196,8 +196,8 @@ async function startServer() {
         ffmpeg(inputPath)
           .noVideo()
           .audioCodec('libmp3lame')
-          .audioBitrate(64)          // was 128 — 64 kbps is plenty for speech recognition
-          .audioFrequency(16000)     // 16 kHz mono is the sweet spot for speech models
+          .audioBitrate(64)
+          .audioFrequency(16000)
           .audioChannels(1)
           .outputOptions(['-threads 1'])
           .on('end', () => resolve())
@@ -205,51 +205,57 @@ async function startServer() {
           .save(audioPath);
       });
 
-      console.log(`[transcribe ${id}] Audio ready. Sending to Gemini...`);
+      console.log(`[transcribe ${id}] Audio ready. Sending to Groq Whisper...`);
 
-      const { GoogleGenAI, Type } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const Groq = (await import('groq-sdk')).default;
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-      const uploadedFile = await ai.files.upload({
-        file: audioPath,
-        mimeType: 'audio/mp3',
+      // Step 1 — transcribe with Whisper (always gets original language + timestamps)
+      const transcription = await groq.audio.transcriptions.create({
+        file: fs.createReadStream(audioPath),
+        model: 'whisper-large-v3',
+        response_format: 'verbose_json',  // gives us word/segment timestamps
+        timestamp_granularities: ['segment'],
       });
 
-      const langInstruction = targetLang === 'original'
-        ? 'Transcribe everything exactly as spoken, keeping the original language.'
-        : `Transcribe and translate everything into ${targetLang}.`;
+      // Step 2 — if translation requested, run a second pass through Groq LLM
+      let segments: Array<{ start: number; end: number; text: string }> =
+        (transcription as any).segments ?? [];
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          uploadedFile,
-          `You are a professional subtitle generator. ${langInstruction}
-Cut phrases into blocks of 2–6 seconds. Respond ONLY with a JSON array, no markdown, no explanation.`,
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                start:      { type: Type.NUMBER, description: 'Start time in seconds' },
-                end:        { type: Type.NUMBER, description: 'End time in seconds' },
-                text:       { type: Type.STRING, description: 'Subtitle text' },
-                confidence: { type: Type.NUMBER, description: 'Confidence 0.70–0.99' },
-              },
-              required: ['start', 'end', 'text', 'confidence'],
+      if (targetLang !== 'original' && segments.length > 0) {
+        console.log(`[transcribe ${id}] Translating to ${targetLang}...`);
+        const texts = segments.map(s => s.text).join('\n');
+        const chat = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'system',
+              content: `You are a professional subtitle translator. Translate the following subtitle lines into ${targetLang}. Return ONLY a JSON array of strings, one per line, same order, no explanation, no markdown.`,
             },
-          },
-        },
-      });
+            { role: 'user', content: texts },
+          ],
+          temperature: 0.2,
+        });
+        try {
+          const raw = chat.choices[0]?.message?.content ?? '[]';
+          const clean = raw.replace(/```json|```/g, '').trim();
+          const translated: string[] = JSON.parse(clean);
+          segments = segments.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
+        } catch {
+          // translation parse failed — keep original
+          console.warn(`[transcribe ${id}] Translation parse failed, keeping original`);
+        }
+      }
 
-      const subtitles = JSON.parse(response.text || '[]');
+      // Build subtitle objects with confidence heuristic
+      const subtitles = segments.map(s => ({
+        start: s.start,
+        end: s.end,
+        text: s.text.trim(),
+        confidence: 0.9, // Whisper large-v3 is consistently high; segments don't expose per-segment score
+      }));
 
-      // Cleanup Gemini file (fire-and-forget)
-      ai.files.delete({ name: uploadedFile.name }).catch(() => {});
       cleanup();
-
       res.json({ subtitles });
 
     } catch (e: any) {
