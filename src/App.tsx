@@ -299,7 +299,7 @@ function ProcessingView({ fileName }: { fileName: string }) {
       <p className="proc-file">{fileName}</p>
       <div className="proc-steps">
         <span className="sbadge active">Extracting audio</span>
-        <span className="sbadge">Gemini AI</span>
+        <span className="sbadge">Whisper AI</span>
         <span className="sbadge">Translating</span>
       </div>
     </div>
@@ -580,7 +580,7 @@ export default function App() {
         <main className="main">
           {step === "upload" && (
             <div className="page-ctr fade-in">
-              <div className="hero"><h1>Transcribe & translate<br />your videos</h1><p>Powered by Gemini AI — free, fast, no subscription</p></div>
+              <div className="hero"><h1>Transcribe & translate<br />your videos</h1><p>Powered by Whisper AI — free, fast, no subscription</p></div>
               {error && <div className="err-banner">⚠ {error}</div>}
               <UploadZone onFile={handleFile} />
               {videoFile && (
