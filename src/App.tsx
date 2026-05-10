@@ -114,66 +114,74 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
 }
 
 // ─── Client-side video export ─────────────────────────────────────────────────
+// Creates a hidden <video> so export works even from the export step (editor unmounted)
 async function exportVideoClientSide(
-  videoEl: HTMLVideoElement,
+  videoUrl: string,
   subtitles: Subtitle[],
   style: SubStyle,
   onProgress: (pct: number) => void
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext("2d")!;
+    const vid = document.createElement("video");
+    vid.src = videoUrl;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.style.cssText = "position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0;";
+    document.body.appendChild(vid);
+    const cleanup = () => { try { document.body.removeChild(vid); } catch {} };
 
-    const canvasStream = canvas.captureStream(30);
+    vid.onerror = () => { cleanup(); reject(new Error("Failed to load video for export.")); };
 
-    // Grab audio from the video element's own stream
-    const videoStream: MediaStream = (videoEl as any).captureStream?.() ?? (videoEl as any).mozCaptureStream?.();
-    if (videoStream) {
-      videoStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-    }
+    vid.onloadedmetadata = () => {
+      const W = vid.videoWidth;
+      const H = vid.videoHeight;
+      if (!W || !H) { cleanup(); return reject(new Error("Could not read video dimensions.")); }
 
-    const mimeType =
-      MediaRecorder.isTypeSupported("video/mp4;codecs=avc1,mp4a.40.2") ? "video/mp4;codecs=avc1,mp4a.40.2" :
-      MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4" :
-      MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" :
-      "video/webm";
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d")!;
 
-    const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
-    recorder.onerror = (e: any) => reject(e.error ?? e);
+      const canvasStream = canvas.captureStream(30);
+      const vidStream: MediaStream | undefined = (vid as any).captureStream?.();
+      if (vidStream) vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
-    const duration = videoEl.duration;
-    videoEl.currentTime = 0;
-    videoEl.muted = true;
-    videoEl.playbackRate = 1;
+      const mimeType =
+        MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
+        MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" :
+        "video/webm";
 
-    recorder.start(200);
-    let rafId = 0;
+      const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => { cleanup(); resolve(new Blob(chunks, { type: mimeType })); };
+      recorder.onerror = (e: any) => { cleanup(); reject(e.error ?? e); };
 
-    const drawFrame = () => {
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      const sub = subtitles.find(s => videoEl.currentTime >= s.start && videoEl.currentTime <= s.end);
-      if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, canvas.width, canvas.height);
-      onProgress(Math.min(99, Math.round((videoEl.currentTime / duration) * 100)));
-      if (!videoEl.paused && !videoEl.ended) rafId = requestAnimationFrame(drawFrame);
+      const duration = vid.duration;
+      let rafId = 0;
+
+      const drawFrame = () => {
+        ctx.drawImage(vid, 0, 0, W, H);
+        const t = vid.currentTime;
+        const sub = subtitles.find(s => t >= s.start && t <= s.end);
+        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H);
+        onProgress(Math.min(99, Math.round((t / duration) * 100)));
+        if (!vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
+      };
+
+      vid.onended = () => {
+        cancelAnimationFrame(rafId);
+        ctx.drawImage(vid, 0, 0, W, H);
+        recorder.stop();
+        onProgress(100);
+      };
+
+      vid.currentTime = 0;
+      vid.play()
+        .then(() => { recorder.start(200); rafId = requestAnimationFrame(drawFrame); })
+        .catch(e => { cleanup(); reject(e); });
     };
 
-    videoEl.onended = () => {
-      cancelAnimationFrame(rafId);
-      // draw last frame
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      recorder.stop();
-      onProgress(100);
-      videoEl.muted = false;
-      videoEl.currentTime = 0;
-      videoEl.onended = null;
-    };
-
-    videoEl.play().then(() => { rafId = requestAnimationFrame(drawFrame); }).catch(reject);
+    vid.load();
   });
 }
 
@@ -403,9 +411,9 @@ function CopyButton({ subtitles }: { subtitles: Subtitle[] }) {
 }
 
 // ─── ExportPanel ──────────────────────────────────────────────────────────────
-function ExportPanel({ subtitles, videoFile, videoRef, style, onBack, nativeW, nativeH }: {
+function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, nativeH }: {
   subtitles: Subtitle[]; videoFile: File | null;
-  videoRef: React.RefObject<HTMLVideoElement>;
+  videoUrl: string;
   style: SubStyle; onBack: () => void; nativeW: number; nativeH: number;
 }) {
   const [clientProgress, setClientProgress] = useState<number | null>(null);
@@ -420,11 +428,10 @@ function ExportPanel({ subtitles, videoFile, videoRef, style, onBack, nativeW, n
 
   // Client-side: Canvas + MediaRecorder
   const renderClient = async () => {
-    const vid = videoRef.current;
-    if (!vid) return;
+    if (!videoUrl) return;
     setClientProgress(0); setClientDone(false);
     try {
-      const blob = await exportVideoClientSide(vid, subtitles, style, pct => setClientProgress(pct));
+      const blob = await exportVideoClientSide(videoUrl, subtitles, style, pct => setClientProgress(pct));
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
       setClientDone(true);
@@ -629,7 +636,7 @@ export default function App() {
 
           {step === "export" && (
             <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} videoRef={videoRef} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} />
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} videoUrl={videoUrl} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} />
             </div>
           )}
         </main>
