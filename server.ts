@@ -196,10 +196,11 @@ async function startServer() {
         ffmpeg(inputPath)
           .noVideo()
           .audioCodec('libmp3lame')
-          .audioBitrate(64)
-          .audioFrequency(16000)
+          .audioBitrate(128)
+          // NO audioFrequency() resampling — it shifts pts and causes progressive drift
+          // aresample=async=1 fixes irregular pts from VFR sources (Instagram, TikTok, etc.)
           .audioChannels(1)
-          .outputOptions(['-threads 1'])
+          .outputOptions(['-af', 'aresample=async=1', '-threads', '1'])
           .on('end', () => resolve())
           .on('error', reject)
           .save(audioPath);
