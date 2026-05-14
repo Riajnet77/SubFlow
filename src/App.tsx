@@ -97,7 +97,6 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
   const fs = Math.max(10, style.fontSize);
   const previewBoxH = previewFontScale ? (style.box.h / 100) * (H * previewFontScale) : (style.box.h / 100) * H;
   const maxLines = Math.max(1, Math.floor(previewBoxH / (fs * (previewFontScale ?? 1) * 1.25)));
-  console.log('[draw] fs:', fs, 'W:', W, 'H:', H, 'cx:', ((style.box.x + style.box.w/2)/100)*W, 'cy:', ((style.box.y + style.box.h/2)/100)*H, 'maxW:', (style.box.w/100)*W-16, 'maxLines:', maxLines, 'previewFontScale:', previewFontScale, 'box:', JSON.stringify(style.box));
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
   const maxW = (style.box.w / 100) * W - 16;
@@ -484,7 +483,6 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
     setClientProgress(0); setClientDone(false);
     try {
       const exportFontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
-      console.log('[export] fontSize:', style.fontSize, 'dispH:', dispH, 'nativeH:', nativeH, 'fontScale:', exportFontScale);
       const blob = await exportVideoClientSide(videoUrl, subtitles, style, exportFontScale, pct => setClientProgress(pct));
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
