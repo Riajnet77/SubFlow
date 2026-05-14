@@ -87,30 +87,62 @@ function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(
 // ─── Canvas subtitle renderer ─────────────────────────────────────────────────
 function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number) {
   if (!text) return;
-  const fs = style.fontSize;
+
+  // Scale font size from preview px to native video px
+  // style.fontSize is in preview pixels; W/H are native video dimensions
+  // We scale relative to video height so it matches what the user saw
+  const fs = Math.round(style.fontSize * (H / 720)); // 720 is reference height
+
+  // Center of the subtitle box in native video pixels
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
+
+  // Max width respects the box width so text doesn't overflow
+  const maxW = (style.box.w / 100) * W - 16;
 
   ctx.font = `${fs}px "${style.fontName}", sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  if (style.bgOpacity > 0) {
-    const metrics = ctx.measureText(text);
-    const pad = 8;
-    ctx.save();
-    ctx.globalAlpha = style.bgOpacity;
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(cx - metrics.width / 2 - pad, cy - fs / 2 - pad / 2, metrics.width + pad * 2, fs + pad);
-    ctx.restore();
+  // Word-wrap text into lines that fit within maxW
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxW && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
   }
+  if (line) lines.push(line);
 
-  ctx.strokeStyle = style.outlineColor;
-  ctx.lineWidth = Math.max(2, fs * 0.08);
-  ctx.lineJoin = "round";
-  ctx.strokeText(text, cx, cy);
-  ctx.fillStyle = style.primaryColor;
-  ctx.fillText(text, cx, cy);
+  const lineH = fs * 1.25;
+  const totalH = lineH * lines.length;
+  const startY = cy - totalH / 2 + lineH / 2;
+
+  lines.forEach((ln, i) => {
+    const y = startY + i * lineH;
+    const lw = ctx.measureText(ln).width;
+    const pad = 8;
+
+    if (style.bgOpacity > 0) {
+      ctx.save();
+      ctx.globalAlpha = style.bgOpacity;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(cx - lw / 2 - pad, y - fs / 2 - pad / 2, lw + pad * 2, fs + pad);
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = style.outlineColor;
+    ctx.lineWidth = Math.max(2, fs * 0.08);
+    ctx.lineJoin = "round";
+    ctx.strokeText(ln, cx, y);
+    ctx.fillStyle = style.primaryColor;
+    ctx.fillText(ln, cx, y);
+  });
 }
 
 // ─── Client-side video export ─────────────────────────────────────────────────
@@ -168,16 +200,25 @@ async function exportVideoClientSide(
         if (!vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
       };
 
-      vid.onended = () => {
+      let safetyTimer: ReturnType<typeof setTimeout>;
+
+      const finish = () => {
+        clearTimeout(safetyTimer);
         cancelAnimationFrame(rafId);
         ctx.drawImage(vid, 0, 0, W, H);
-        recorder.stop();
+        if (recorder.state !== "inactive") recorder.stop();
         onProgress(100);
       };
 
+      vid.onended = finish;
+
       vid.currentTime = 0;
       vid.play()
-        .then(() => { recorder.start(200); rafId = requestAnimationFrame(drawFrame); })
+        .then(() => {
+          recorder.start(200);
+          rafId = requestAnimationFrame(drawFrame);
+          safetyTimer = setTimeout(finish, (duration + 3) * 1000);
+        })
         .catch(e => { cleanup(); reject(e); });
     };
 
