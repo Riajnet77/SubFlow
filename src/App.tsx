@@ -95,9 +95,9 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
   // BUT the user may have a large font that wraps long text into many lines.
   // We constrain ONLY by maxW (horizontal), not box height, so text always renders fully.
   const fs = Math.max(10, style.fontSize);
-  // Max lines = how many fit in the box as the user saw in preview
   const previewBoxH = previewFontScale ? (style.box.h / 100) * (H * previewFontScale) : (style.box.h / 100) * H;
   const maxLines = Math.max(1, Math.floor(previewBoxH / (fs * (previewFontScale ?? 1) * 1.25)));
+  console.log('[draw] fs:', fs, 'W:', W, 'H:', H, 'cx:', ((style.box.x + style.box.w/2)/100)*W, 'cy:', ((style.box.y + style.box.h/2)/100)*H, 'maxW:', (style.box.w/100)*W-16, 'maxLines:', maxLines, 'previewFontScale:', previewFontScale, 'box:', JSON.stringify(style.box));
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
   const maxW = (style.box.w / 100) * W - 16;
