@@ -484,6 +484,7 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
     setClientProgress(0); setClientDone(false);
     try {
       const exportFontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
+      console.log('[export] fontSize:', style.fontSize, 'dispH:', dispH, 'nativeH:', nativeH, 'fontScale:', exportFontScale);
       const blob = await exportVideoClientSide(videoUrl, subtitles, style, exportFontScale, pct => setClientProgress(pct));
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
