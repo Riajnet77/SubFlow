@@ -85,36 +85,40 @@ function toTimecode(s: number) {
 function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`; }
 
 // ─── Canvas subtitle renderer ─────────────────────────────────────────────────
-function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number) {
+function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number, previewFontScale?: number) {
   if (!text) return;
 
+  // The user positioned and sized the subtitle in the preview (dispH tall).
+  // style.fontSize is in "base units" — the preview renders it as fontSize*fontScale px.
+  // On the canvas (H px tall), we want the SAME visual proportion:
+  //   canvasFontPx = fontSize * fontScale * (H / dispH) = fontSize (math cancels)
+  // BUT the user may have a large font that wraps long text into many lines.
+  // We constrain ONLY by maxW (horizontal), not box height, so text always renders fully.
+  const fs = Math.max(10, style.fontSize);
+  // Max lines = how many fit in the box as the user saw in preview
+  const previewBoxH = previewFontScale ? (style.box.h / 100) * (H * previewFontScale) : (style.box.h / 100) * H;
+  const maxLines = Math.max(1, Math.floor(previewBoxH / (fs * (previewFontScale ?? 1) * 1.25)));
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
   const maxW = (style.box.w / 100) * W - 16;
-  const maxH = (style.box.h / 100) * H;
 
-  // Auto-fit: shrink font until text wraps into lines that fit inside the box height
-  const wrapLines = (fs: number) => {
-    ctx.font = `${fs}px "${style.fontName}", sans-serif`;
-    const words = text.split(" ");
-    const lines: string[] = [];
-    let line = "";
-    for (const word of words) {
-      const test = line ? line + " " + word : word;
-      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
-      else line = test;
-    }
-    if (line) lines.push(line);
-    return lines;
-  };
+  ctx.font = `${fs}px "${style.fontName}", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
 
-  let fs = Math.max(10, style.fontSize);
-  let lines = wrapLines(fs);
-  // Shrink until all lines fit vertically inside the box
-  while (lines.length * fs * 1.25 > maxH && fs > 10) {
-    fs = Math.max(10, fs - 2);
-    lines = wrapLines(fs);
+  // Word-wrap constrained by width and max lines visible in preview
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxW && line) {
+      lines.push(line);
+      if (lines.length >= maxLines) { line = ""; break; } // stop at max visible lines
+      line = word;
+    } else line = test;
   }
+  if (line && lines.length < maxLines) lines.push(line);
 
   const lineH = fs * 1.25;
   const totalH = lineH * lines.length;
@@ -124,7 +128,6 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
     const y = startY + i * lineH;
     const lw = ctx.measureText(ln).width;
     const pad = 8;
-
     if (style.bgOpacity > 0) {
       ctx.save();
       ctx.globalAlpha = style.bgOpacity;
@@ -132,7 +135,6 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
       ctx.fillRect(cx - lw / 2 - pad, y - fs / 2 - pad / 2, lw + pad * 2, fs + pad);
       ctx.restore();
     }
-
     ctx.strokeStyle = style.outlineColor;
     ctx.lineWidth = Math.max(2, fs * 0.08);
     ctx.lineJoin = "round";
@@ -148,6 +150,7 @@ async function exportVideoClientSide(
   videoUrl: string,
   subtitles: Subtitle[],
   style: SubStyle,
+  previewFontScale: number,
   onProgress: (pct: number) => void
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -192,29 +195,40 @@ async function exportVideoClientSide(
         ctx.drawImage(vid, 0, 0, W, H);
         const t = vid.currentTime;
         const sub = subtitles.find(s => t >= s.start && t <= s.end);
-        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H);
+        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, previewFontScale);
         onProgress(Math.min(99, Math.round((t / duration) * 100)));
         if (!vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
       };
 
       let safetyTimer: ReturnType<typeof setTimeout>;
+      let finished = false;
 
       const finish = () => {
+        if (finished) return;
+        finished = true;
         clearTimeout(safetyTimer);
         cancelAnimationFrame(rafId);
         ctx.drawImage(vid, 0, 0, W, H);
-        if (recorder.state !== "inactive") recorder.stop();
+        setTimeout(() => {
+          if (recorder.state !== "inactive") recorder.stop();
+        }, 300); // let last chunk flush
         onProgress(100);
       };
 
       vid.onended = finish;
+      // Backup: detect end via timeupdate when currentTime stops advancing near duration
+      vid.ontimeupdate = () => {
+        if (vid.duration && vid.currentTime >= vid.duration - 0.15) finish();
+      };
 
       vid.currentTime = 0;
       vid.play()
         .then(() => {
           recorder.start(200);
           rafId = requestAnimationFrame(drawFrame);
-          safetyTimer = setTimeout(finish, (duration + 3) * 1000);
+          // Safety timeout: duration*1000 + 5s buffer
+          const safeDur = (isFinite(vid.duration) ? vid.duration : 300) + 5;
+          safetyTimer = setTimeout(finish, safeDur * 1000);
         })
         .catch(e => { cleanup(); reject(e); });
     };
@@ -449,10 +463,10 @@ function CopyButton({ subtitles }: { subtitles: Subtitle[] }) {
 }
 
 // ─── ExportPanel ──────────────────────────────────────────────────────────────
-function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, nativeH }: {
+function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, nativeH, dispH }: {
   subtitles: Subtitle[]; videoFile: File | null;
   videoUrl: string;
-  style: SubStyle; onBack: () => void; nativeW: number; nativeH: number;
+  style: SubStyle; onBack: () => void; nativeW: number; nativeH: number; dispH: number;
 }) {
   const [clientProgress, setClientProgress] = useState<number | null>(null);
   const [clientDone, setClientDone] = useState(false);
@@ -469,7 +483,8 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
     if (!videoUrl) return;
     setClientProgress(0); setClientDone(false);
     try {
-      const blob = await exportVideoClientSide(videoUrl, subtitles, style, pct => setClientProgress(pct));
+      const exportFontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
+      const blob = await exportVideoClientSide(videoUrl, subtitles, style, exportFontScale, pct => setClientProgress(pct));
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
       setClientDone(true);
@@ -674,7 +689,7 @@ export default function App() {
 
           {step === "export" && (
             <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} videoUrl={videoUrl} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} />
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} videoUrl={videoUrl} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} dispH={dispH} />
             </div>
           )}
         </main>
