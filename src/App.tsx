@@ -88,36 +88,33 @@ function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(
 function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number) {
   if (!text) return;
 
-  // Scale font size from preview px to native video px
-  // style.fontSize is in preview pixels; W/H are native video dimensions
-  // We scale relative to video height so it matches what the user saw
-  const fs = Math.round(style.fontSize * (H / 720)); // 720 is reference height
-
-  // Center of the subtitle box in native video pixels
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
-
-  // Max width respects the box width so text doesn't overflow
   const maxW = (style.box.w / 100) * W - 16;
+  const maxH = (style.box.h / 100) * H;
 
-  ctx.font = `${fs}px "${style.fontName}", sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  // Word-wrap text into lines that fit within maxW
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? line + " " + word : word;
-    if (ctx.measureText(test).width > maxW && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
+  // Auto-fit: shrink font until text wraps into lines that fit inside the box height
+  const wrapLines = (fs: number) => {
+    ctx.font = `${fs}px "${style.fontName}", sans-serif`;
+    const words = text.split(" ");
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
+      else line = test;
     }
+    if (line) lines.push(line);
+    return lines;
+  };
+
+  let fs = Math.max(10, style.fontSize);
+  let lines = wrapLines(fs);
+  // Shrink until all lines fit vertically inside the box
+  while (lines.length * fs * 1.25 > maxH && fs > 10) {
+    fs = Math.max(10, fs - 2);
+    lines = wrapLines(fs);
   }
-  if (line) lines.push(line);
 
   const lineH = fs * 1.25;
   const totalH = lineH * lines.length;
