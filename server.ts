@@ -267,32 +267,47 @@ async function startServer() {
       // Step 3 — translate in a single batch if requested
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
-        const texts = segments.map(s => s.text).join('\n');
+
+        // Send as numbered lines: "1|||text" so the model returns "1|||translation"
+        // The ||| separator is unlikely to appear in subtitles
+        const numbered = segments.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+
         const chat = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
-              content: `Translate the following subtitle lines to ${targetLang}. Return ONLY a raw JSON array of strings, one per line, same count and order. No markdown, no explanation, no extra text.`,
+              content: `Translate each subtitle line to ${targetLang}.
+Each line starts with a number and ||| separator. Keep the exact same format.
+Return ONLY the translated lines with their numbers, nothing else.
+Example:
+Input:  1|||Hello world
+        2|||How are you
+Output: 1|||Olá mundo
+        2|||Como vai você`,
             },
-            { role: 'user', content: texts },
+            { role: 'user', content: numbered },
           ],
           temperature: 0.1,
           max_tokens: 4096,
         });
+
         try {
           const raw = chat.choices[0]?.message?.content ?? '';
-          // Extract the JSON array — find first [ and last ] to handle any surrounding text
-          const start = raw.indexOf('[');
-          const end = raw.lastIndexOf(']');
-          if (start === -1 || end === -1 || end <= start) throw new Error('No JSON array found in response');
-          const clean = raw.slice(start, end + 1);
-          const translated: string[] = JSON.parse(clean);
+          // Parse "N|||text" format — robust to missing lines or reordering
+          const translationMap = new Map<number, string>();
+          for (const line of raw.split('\n')) {
+            const match = line.match(/^(\d+)\|\|\|(.+)$/);
+            if (match) {
+              translationMap.set(parseInt(match[1]), match[2].trim());
+            }
+          }
+          // Apply only translations we received — keep original for any missing
           segments = segments.map((s, i) => ({
             ...s,
-            text: (translated[i] && translated[i].trim()) ? translated[i].trim() : s.text,
+            text: translationMap.get(i + 1) ?? s.text,
           }));
-          console.log(`[transcribe ${id}] Translation OK: got ${translated.length} of ${segments.length}`);
+          console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
         } catch (e) {
           console.warn(`[transcribe ${id}] Translation parse failed, keeping original:`, e);
         }
