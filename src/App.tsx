@@ -155,7 +155,7 @@ async function exportVideoClientSide(
   return new Promise((resolve, reject) => {
     const vid = document.createElement("video");
     vid.src = videoUrl;
-    vid.muted = false; // AudioContext requires unmuted source
+    vid.muted = true; // muted so browser doesn't play audio — AudioContext captures it independently
     vid.playsInline = true;
     vid.style.cssText = "position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0;";
     document.body.appendChild(vid);
@@ -174,15 +174,13 @@ async function exportVideoClientSide(
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d")!;
 
-      // Use AudioContext to capture audio — more reliable than captureStream audio tracks
-      // which can desync when video is muted
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaElementSource(vid);
-      const dest = audioCtx.createMediaStreamDestination();
-      source.connect(dest); // route audio only to recorder, not speakers
+      // Capture audio via captureStream BEFORE muting
+      // captureStream on an unmuted element works, then we mute to silence speakers
+      const vidStream: MediaStream = (vid as any).captureStream();
+      vid.muted = true; // silence speakers after capturing stream
 
       const canvasStream = canvas.captureStream(30);
-      dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+      vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
@@ -193,12 +191,11 @@ async function exportVideoClientSide(
       const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
 
       recorder.onstop = () => {
-        audioCtx.close();
         removeVid();
         resolve(new Blob(chunks, { type: mimeType }));
       };
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onerror = (e: any) => { audioCtx.close(); removeVid(); reject(e.error ?? e); };
+      recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
 
       const duration = vid.duration;
       let rafId = 0;
@@ -241,7 +238,7 @@ async function exportVideoClientSide(
           const safeDur = (isFinite(duration) ? duration : 300) + 8;
           safetyTimer = setTimeout(finish, safeDur * 1000);
         })
-        .catch(e => { audioCtx.close(); removeVid(); reject(e); });
+        .catch(e => { removeVid(); reject(e); });
     };
 
     vid.load();
