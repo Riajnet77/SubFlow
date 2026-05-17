@@ -179,8 +179,7 @@ async function exportVideoClientSide(
       const audioCtx = new AudioContext();
       const source = audioCtx.createMediaElementSource(vid);
       const dest = audioCtx.createMediaStreamDestination();
-      source.connect(dest);
-      source.connect(audioCtx.destination); // keep audible during export (optional)
+      source.connect(dest); // route audio only to recorder, not speakers
 
       const canvasStream = canvas.captureStream(30);
       dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
