@@ -228,8 +228,6 @@ async function exportVideoClientSide(
         if (vid.currentTime >= vid.duration - 0.1) finish();
       };
 
-      // Must unmute for AudioContext to work — audio is routed through AudioContext not speakers
-      vid.muted = false;
       vid.currentTime = 0;
       vid.play()
         .then(() => {
