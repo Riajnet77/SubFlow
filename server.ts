@@ -267,35 +267,32 @@ async function startServer() {
       // Step 3 — translate in a single batch if requested
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
-        // Number each line so the model can't reorder them
-        const numbered = segments.map((s, i) => `${i + 1}|${s.text}`).join('\n');
+        const texts = segments.map(s => s.text).join('\n');
         const chat = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
-              content: `You are a professional subtitle translator. Translate each line into ${targetLang}.
-Each input line is prefixed with a number and pipe: "1|text". 
-Return ONLY a JSON array of strings in the same order, one translated string per index (no numbers, no pipes).
-Example input: "1|Hello\n2|World" → ["Olá","Mundo"]
-No markdown, no explanation.`,
+              content: `Translate the following subtitle lines to ${targetLang}. Return ONLY a raw JSON array of strings, one per line, same count and order. No markdown, no explanation, no extra text.`,
             },
-            { role: 'user', content: numbered },
+            { role: 'user', content: texts },
           ],
           temperature: 0.1,
           max_tokens: 4096,
         });
         try {
           const raw = chat.choices[0]?.message?.content ?? '[]';
-          const clean = raw.replace(/```json|```/g, '').trim();
+          // Strip markdown fences and any leading/trailing non-JSON characters
+          const clean = raw.replace(/```(?:json)?|```/g, '').trim().replace(/^[^\[]*/, '').replace(/[^\]]*$/, '');
           const translated: string[] = JSON.parse(clean);
-          if (translated.length === segments.length) {
-            segments = segments.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
-          } else {
-            console.warn(`[transcribe ${id}] Translation count mismatch: got ${translated.length}, expected ${segments.length}. Keeping original.`);
-          }
-        } catch {
-          console.warn(`[transcribe ${id}] Translation parse failed, keeping original`);
+          // Apply translations — if count mismatches, map what we have and keep original for the rest
+          segments = segments.map((s, i) => ({
+            ...s,
+            text: (translated[i] && translated[i].trim()) ? translated[i].trim() : s.text,
+          }));
+          console.log(`[transcribe ${id}] Translation OK: got ${translated.length} of ${segments.length}`);
+        } catch (e) {
+          console.warn(`[transcribe ${id}] Translation parse failed, keeping original:`, e);
         }
       }
 
