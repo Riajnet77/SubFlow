@@ -7,6 +7,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import Groq from 'groq-sdk';
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -208,7 +209,6 @@ async function startServer() {
 
       console.log(`[transcribe ${id}] Audio ready. Sending to Groq Whisper...`);
 
-      const Groq = (await import('groq-sdk')).default;
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
       // Step 1 — transcribe with word-level timestamps for precise splitting
