@@ -155,7 +155,7 @@ async function exportVideoClientSide(
   return new Promise((resolve, reject) => {
     const vid = document.createElement("video");
     vid.src = videoUrl;
-    vid.muted = true;
+    vid.muted = false; // AudioContext requires unmuted source
     vid.playsInline = true;
     vid.style.cssText = "position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0;";
     document.body.appendChild(vid);
@@ -174,10 +174,16 @@ async function exportVideoClientSide(
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d")!;
 
-      // Must call captureStream BEFORE play() so audio track is live from the start
-      const vidStream: MediaStream = (vid as any).captureStream();
+      // Use AudioContext to capture audio — more reliable than captureStream audio tracks
+      // which can desync when video is muted
+      const audioCtx = new AudioContext();
+      const source = audioCtx.createMediaElementSource(vid);
+      const dest = audioCtx.createMediaStreamDestination();
+      source.connect(dest);
+      source.connect(audioCtx.destination); // keep audible during export (optional)
+
       const canvasStream = canvas.captureStream(30);
-      vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+      dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
@@ -187,13 +193,13 @@ async function exportVideoClientSide(
       const chunks: Blob[] = [];
       const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
 
-      // onstop fires AFTER the last chunk — safe to resolve here
       recorder.onstop = () => {
+        audioCtx.close();
         removeVid();
         resolve(new Blob(chunks, { type: mimeType }));
       };
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
+      recorder.onerror = (e: any) => { audioCtx.close(); removeVid(); reject(e.error ?? e); };
 
       const duration = vid.duration;
       let rafId = 0;
@@ -206,10 +212,9 @@ async function exportVideoClientSide(
         clearTimeout(safetyTimer);
         vid.pause();
         cancelAnimationFrame(rafId);
-        // Draw final frame then request last chunk before stopping
         ctx.drawImage(vid, 0, 0, W, H);
-        recorder.requestData(); // flush remaining buffered data
-        recorder.stop();        // triggers onstop after last chunk is committed
+        recorder.requestData();
+        recorder.stop();
         onProgress(100);
       };
 
@@ -224,18 +229,20 @@ async function exportVideoClientSide(
 
       vid.onended = finish;
       vid.ontimeupdate = () => {
-        if (vid.duration && vid.currentTime >= vid.duration - 0.1) finish();
+        if (vid.currentTime >= vid.duration - 0.1) finish();
       };
 
+      // Must unmute for AudioContext to work — audio is routed through AudioContext not speakers
+      vid.muted = false;
       vid.currentTime = 0;
       vid.play()
         .then(() => {
-          recorder.start(100); // smaller chunks = more reliable final flush
+          recorder.start(100);
           rafId = requestAnimationFrame(drawFrame);
           const safeDur = (isFinite(duration) ? duration : 300) + 8;
           safetyTimer = setTimeout(finish, safeDur * 1000);
         })
-        .catch(e => { removeVid(); reject(e); });
+        .catch(e => { audioCtx.close(); removeVid(); reject(e); });
     };
 
     vid.load();
