@@ -211,50 +211,103 @@ async function startServer() {
       const Groq = (await import('groq-sdk')).default;
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-      // Step 1 — transcribe with Whisper (always gets original language + timestamps)
+      // Step 1 — transcribe with word-level timestamps for precise splitting
       const transcription = await groq.audio.transcriptions.create({
         file: fs.createReadStream(audioPath),
         model: 'whisper-large-v3',
-        response_format: 'verbose_json',  // gives us word/segment timestamps
-        timestamp_granularities: ['segment'],
+        response_format: 'verbose_json',
+        timestamp_granularities: ['segment', 'word'],
       });
 
-      // Step 2 — if translation requested, run a second pass through Groq LLM
-      let segments: Array<{ start: number; end: number; text: string }> =
+      const rawSegments: Array<{ start: number; end: number; text: string }> =
         (transcription as any).segments ?? [];
+      const words: Array<{ start: number; end: number; word: string }> =
+        (transcription as any).words ?? [];
 
+      // Step 2 — split long segments (>5s) into smaller chunks using word timestamps
+      const MAX_SEG_DURATION = 5; // seconds
+      const splitSegments: Array<{ start: number; end: number; text: string }> = [];
+
+      for (const seg of rawSegments) {
+        const dur = seg.end - seg.start;
+        if (dur <= MAX_SEG_DURATION || words.length === 0) {
+          splitSegments.push(seg);
+          continue;
+        }
+        // Get words that belong to this segment
+        const segWords = words.filter(w => w.start >= seg.start && w.end <= seg.end + 0.1);
+        if (segWords.length === 0) { splitSegments.push(seg); continue; }
+
+        // Group words into chunks of ~MAX_SEG_DURATION seconds
+        let chunk: typeof segWords = [];
+        let chunkStart = segWords[0].start;
+        for (const w of segWords) {
+          chunk.push(w);
+          if (w.end - chunkStart >= MAX_SEG_DURATION) {
+            splitSegments.push({
+              start: chunkStart,
+              end: w.end,
+              text: chunk.map(x => x.word).join(' ').trim(),
+            });
+            chunk = [];
+            chunkStart = w.end;
+          }
+        }
+        if (chunk.length > 0) {
+          splitSegments.push({
+            start: chunkStart,
+            end: chunk[chunk.length - 1].end,
+            text: chunk.map(x => x.word).join(' ').trim(),
+          });
+        }
+      }
+
+      let segments = splitSegments;
+
+      // Step 3 — translate in a single batch if requested
       if (targetLang !== 'original' && segments.length > 0) {
-        console.log(`[transcribe ${id}] Translating to ${targetLang}...`);
-        const texts = segments.map(s => s.text).join('\n');
+        console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
+        // Number each line so the model can't reorder them
+        const numbered = segments.map((s, i) => `${i + 1}|${s.text}`).join('\n');
         const chat = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
-              content: `You are a professional subtitle translator. Translate the following subtitle lines into ${targetLang}. Return ONLY a JSON array of strings, one per line, same order, no explanation, no markdown.`,
+              content: `You are a professional subtitle translator. Translate each line into ${targetLang}.
+Each input line is prefixed with a number and pipe: "1|text". 
+Return ONLY a JSON array of strings in the same order, one translated string per index (no numbers, no pipes).
+Example input: "1|Hello\n2|World" → ["Olá","Mundo"]
+No markdown, no explanation.`,
             },
-            { role: 'user', content: texts },
+            { role: 'user', content: numbered },
           ],
-          temperature: 0.2,
+          temperature: 0.1,
+          max_tokens: 4096,
         });
         try {
           const raw = chat.choices[0]?.message?.content ?? '[]';
           const clean = raw.replace(/```json|```/g, '').trim();
           const translated: string[] = JSON.parse(clean);
-          segments = segments.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
+          if (translated.length === segments.length) {
+            segments = segments.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
+          } else {
+            console.warn(`[transcribe ${id}] Translation count mismatch: got ${translated.length}, expected ${segments.length}. Keeping original.`);
+          }
         } catch {
-          // translation parse failed — keep original
           console.warn(`[transcribe ${id}] Translation parse failed, keeping original`);
         }
       }
 
-      // Build subtitle objects with confidence heuristic
-      const subtitles = segments.map(s => ({
-        start: s.start,
-        end: s.end,
-        text: s.text.trim(),
-        confidence: 0.9, // Whisper large-v3 is consistently high; segments don't expose per-segment score
-      }));
+      // Build final subtitle objects
+      const subtitles = segments
+        .filter(s => s.text.trim().length > 0)
+        .map(s => ({
+          start: s.start,
+          end: s.end,
+          text: s.text.trim(),
+          confidence: 0.9,
+        }));
 
       cleanup();
       res.json({ subtitles });
