@@ -159,36 +159,59 @@ async function exportVideoClientSide(
     vid.playsInline = true;
     vid.style.cssText = "position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0;";
     document.body.appendChild(vid);
-    const cleanup = () => { try { document.body.removeChild(vid); } catch {} };
 
-    vid.onerror = () => { cleanup(); reject(new Error("Failed to load video for export.")); };
+    // cleanup only AFTER recorder has fully stopped and blob is ready
+    const removeVid = () => { try { document.body.removeChild(vid); } catch {} };
+
+    vid.onerror = () => { removeVid(); reject(new Error("Failed to load video for export.")); };
 
     vid.onloadedmetadata = () => {
       const W = vid.videoWidth;
       const H = vid.videoHeight;
-      if (!W || !H) { cleanup(); return reject(new Error("Could not read video dimensions.")); }
+      if (!W || !H) { removeVid(); return reject(new Error("Could not read video dimensions.")); }
 
       const canvas = document.createElement("canvas");
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d")!;
 
+      // Must call captureStream BEFORE play() so audio track is live from the start
+      const vidStream: MediaStream = (vid as any).captureStream();
       const canvasStream = canvas.captureStream(30);
-      const vidStream: MediaStream | undefined = (vid as any).captureStream?.();
-      if (vidStream) vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+      vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
 
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
         MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" :
         "video/webm";
 
-      const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
       const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
+
+      // onstop fires AFTER the last chunk — safe to resolve here
+      recorder.onstop = () => {
+        removeVid();
+        resolve(new Blob(chunks, { type: mimeType }));
+      };
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => { cleanup(); resolve(new Blob(chunks, { type: mimeType })); };
-      recorder.onerror = (e: any) => { cleanup(); reject(e.error ?? e); };
+      recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
 
       const duration = vid.duration;
       let rafId = 0;
+      let finished = false;
+      let safetyTimer: ReturnType<typeof setTimeout>;
+
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(safetyTimer);
+        vid.pause();
+        cancelAnimationFrame(rafId);
+        // Draw final frame then request last chunk before stopping
+        ctx.drawImage(vid, 0, 0, W, H);
+        recorder.requestData(); // flush remaining buffered data
+        recorder.stop();        // triggers onstop after last chunk is committed
+        onProgress(100);
+      };
 
       const drawFrame = () => {
         ctx.drawImage(vid, 0, 0, W, H);
@@ -196,40 +219,23 @@ async function exportVideoClientSide(
         const sub = subtitles.find(s => t >= s.start && t <= s.end);
         if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, previewFontScale);
         onProgress(Math.min(99, Math.round((t / duration) * 100)));
-        if (!vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
-      };
-
-      let safetyTimer: ReturnType<typeof setTimeout>;
-      let finished = false;
-
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(safetyTimer);
-        cancelAnimationFrame(rafId);
-        ctx.drawImage(vid, 0, 0, W, H);
-        setTimeout(() => {
-          if (recorder.state !== "inactive") recorder.stop();
-        }, 300); // let last chunk flush
-        onProgress(100);
+        if (!finished && !vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
       };
 
       vid.onended = finish;
-      // Backup: detect end via timeupdate when currentTime stops advancing near duration
       vid.ontimeupdate = () => {
-        if (vid.duration && vid.currentTime >= vid.duration - 0.15) finish();
+        if (vid.duration && vid.currentTime >= vid.duration - 0.1) finish();
       };
 
       vid.currentTime = 0;
       vid.play()
         .then(() => {
-          recorder.start(200);
+          recorder.start(100); // smaller chunks = more reliable final flush
           rafId = requestAnimationFrame(drawFrame);
-          // Safety timeout: duration*1000 + 5s buffer
-          const safeDur = (isFinite(vid.duration) ? vid.duration : 300) + 5;
+          const safeDur = (isFinite(duration) ? duration : 300) + 8;
           safetyTimer = setTimeout(finish, safeDur * 1000);
         })
-        .catch(e => { cleanup(); reject(e); });
+        .catch(e => { removeVid(); reject(e); });
     };
 
     vid.load();
