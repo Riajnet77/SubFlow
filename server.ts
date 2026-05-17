@@ -14,7 +14,7 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
 const upload = multer({
   dest: '/tmp/uploads/',
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
+  limits: { fileSize: 150 * 1024 * 1024 }, // 150 MB — ~10min video at typical bitrates
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -207,7 +207,18 @@ async function startServer() {
           .save(audioPath);
       });
 
-      console.log(`[transcribe ${id}] Audio ready. Sending to Groq Whisper...`);
+      // Validate duration — reject videos over 10 minutes
+      const duration = await new Promise<number>((res, rej) => {
+        ffmpeg.ffprobe(audioPath, (err, meta) => {
+          if (err) rej(err);
+          else res(meta.format.duration ?? 0);
+        });
+      });
+      if (duration > 600) {
+        cleanup();
+        return res.status(400).json({ error: `Video is too long (${Math.round(duration / 60)} min). Maximum is 10 minutes.` });
+      }
+      console.log(`[transcribe ${id}] Duration: ${Math.round(duration)}s. Sending to Groq Whisper...`);
 
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -264,20 +275,21 @@ async function startServer() {
 
       let segments = splitSegments;
 
-      // Step 3 — translate in a single batch if requested
+      // Step 3 — translate in batches of 20 to avoid LLM line-skipping on large inputs
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
 
-        // Send as numbered lines: "1|||text" so the model returns "1|||translation"
-        // The ||| separator is unlikely to appear in subtitles
-        const numbered = segments.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+        const BATCH_SIZE = 20;
+        const translationMap = new Map<number, string>();
 
-        const chat = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            {
-              role: 'system',
-              content: `Translate each subtitle line to ${targetLang}.
+        const translateBatch = async (batchSegments: typeof segments, offset: number) => {
+          const numbered = batchSegments.map((s, i) => `${offset + i + 1}|||${s.text}`).join('\n');
+          const chat = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              {
+                role: 'system',
+                content: `Translate each subtitle line to ${targetLang}.
 Each line starts with a number and ||| separator. Keep the exact same format.
 Return ONLY the translated lines with their numbers, nothing else.
 Example:
@@ -285,32 +297,34 @@ Input:  1|||Hello world
         2|||How are you
 Output: 1|||Olá mundo
         2|||Como vai você`,
-            },
-            { role: 'user', content: numbered },
-          ],
-          temperature: 0.1,
-          max_tokens: 4096,
-        });
-
-        try {
+              },
+              { role: 'user', content: numbered },
+            ],
+            temperature: 0.1,
+            max_tokens: 2048,
+          });
           const raw = chat.choices[0]?.message?.content ?? '';
-          // Parse "N|||text" format — robust to missing lines or reordering
-          const translationMap = new Map<number, string>();
           for (const line of raw.split('\n')) {
             const match = line.match(/^(\d+)\|\|\|(.+)$/);
-            if (match) {
-              translationMap.set(parseInt(match[1]), match[2].trim());
-            }
+            if (match) translationMap.set(parseInt(match[1]), match[2].trim());
           }
-          // Apply only translations we received — keep original for any missing
-          segments = segments.map((s, i) => ({
-            ...s,
-            text: translationMap.get(i + 1) ?? s.text,
-          }));
-          console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
-        } catch (e) {
-          console.warn(`[transcribe ${id}] Translation parse failed, keeping original:`, e);
+        };
+
+        // Process batches sequentially
+        for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+          const batch = segments.slice(i, i + BATCH_SIZE);
+          try {
+            await translateBatch(batch, i);
+          } catch (e) {
+            console.warn(`[transcribe ${id}] Batch ${i}-${i + BATCH_SIZE} failed, keeping original:`, e);
+          }
         }
+
+        segments = segments.map((s, i) => ({
+          ...s,
+          text: translationMap.get(i + 1) ?? s.text,
+        }));
+        console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
       }
 
       // Build final subtitle objects
