@@ -281,11 +281,13 @@ async function startServer() {
           max_tokens: 4096,
         });
         try {
-          const raw = chat.choices[0]?.message?.content ?? '[]';
-          // Strip markdown fences and any leading/trailing non-JSON characters
-          const clean = raw.replace(/```(?:json)?|```/g, '').trim().replace(/^[^\[]*/, '').replace(/[^\]]*$/, '');
+          const raw = chat.choices[0]?.message?.content ?? '';
+          // Extract the JSON array — find first [ and last ] to handle any surrounding text
+          const start = raw.indexOf('[');
+          const end = raw.lastIndexOf(']');
+          if (start === -1 || end === -1 || end <= start) throw new Error('No JSON array found in response');
+          const clean = raw.slice(start, end + 1);
           const translated: string[] = JSON.parse(clean);
-          // Apply translations — if count mismatches, map what we have and keep original for the rest
           segments = segments.map((s, i) => ({
             ...s,
             text: (translated[i] && translated[i].trim()) ? translated[i].trim() : s.text,
