@@ -352,7 +352,7 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
       <div className="upload-icon"><svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2" /><path d="M20 20L28 24L20 28V20Z" fill="currentColor" /><path d="M4 16H44" stroke="currentColor" strokeWidth="2" /><circle cx="9" cy="12" r="1.5" fill="currentColor" /><circle cx="14" cy="12" r="1.5" fill="currentColor" /><circle cx="19" cy="12" r="1.5" fill="currentColor" /></svg></div>
       <p className="upload-title">Drop your video here</p>
-      <p className="upload-sub">MP4, MOV, MKV, AVI, WebM — up to 500 MB</p>
+      <p className="upload-sub">MP4, MOV, MKV, AVI, WebM — up to 10 min · 150 MB</p>
       <button type="button" className="btn-outline" onClick={e => { e.stopPropagation(); ref.current?.click(); }}>Browse files</button>
     </div>
   );
