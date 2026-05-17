@@ -638,7 +638,7 @@ export default function App() {
           {step === "edit" && (
             <div className="hdr-acts">
               <button className="btn-sm-o" onClick={() => setStep("upload")}>← New</button>
-              <button className="btn-sm-p" onClick={() => setStep("export")}>Export →</button>
+              <button className="btn-sm-p" onClick={() => { videoRef.current?.pause(); setStep("export"); }}>Export →</button>
             </div>
           )}
         </header>
