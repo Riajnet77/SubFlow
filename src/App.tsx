@@ -231,10 +231,19 @@ async function exportVideoClientSide(
       vid.currentTime = 0;
       vid.play()
         .then(() => {
-          recorder.start(100);
-          rafId = requestAnimationFrame(drawFrame);
-          const safeDur = (isFinite(duration) ? duration : 300) + 8;
-          safetyTimer = setTimeout(finish, safeDur * 1000);
+          // Wait for first frame before starting recorder
+          const startRecording = () => {
+            ctx.drawImage(vid, 0, 0, W, H);
+            recorder.start(100);
+            rafId = requestAnimationFrame(drawFrame);
+            const safeDur = (isFinite(duration) ? duration : 300) + 8;
+            safetyTimer = setTimeout(finish, safeDur * 1000);
+          };
+          if (vid.readyState >= 2) {
+            startRecording();
+          } else {
+            vid.addEventListener('canplay', startRecording, { once: true });
+          }
         })
         .catch(e => { removeVid(); reject(e); });
     };
