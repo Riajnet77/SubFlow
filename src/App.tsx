@@ -85,7 +85,7 @@ function toTimecode(s: number) {
 function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`; }
 
 // ─── Canvas subtitle renderer ─────────────────────────────────────────────────
-function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number, previewFontScale?: number) {
+function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number, dispH: number) {
   if (!text) return;
 
   // The user positioned and sized the subtitle in the preview (dispH tall).
@@ -94,9 +94,10 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
   //   canvasFontPx = fontSize * fontScale * (H / dispH) = fontSize (math cancels)
   // BUT the user may have a large font that wraps long text into many lines.
   // We constrain ONLY by maxW (horizontal), not box height, so text always renders fully.
-  const fs = Math.max(10, style.fontSize);
-  const previewBoxH = previewFontScale ? (style.box.h / 100) * (H * previewFontScale) : (style.box.h / 100) * H;
-  const maxLines = Math.max(1, Math.floor(previewBoxH / (fs * (previewFontScale ?? 1) * 1.25)));
+  // fontSize is in preview screen px. Scale to canvas native px.
+  // canvas is H px tall, preview was dispH px tall.
+  const fs = Math.max(10, Math.round(style.fontSize * (H / dispH)));
+  const maxLines = Math.max(1, Math.floor((style.box.h / 100) * H / (fs * 1.25)));
   const cx = ((style.box.x + style.box.w / 2) / 100) * W;
   const cy = ((style.box.y + style.box.h / 2) / 100) * H;
   const maxW = (style.box.w / 100) * W - 16;
@@ -105,7 +106,7 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  // Word-wrap constrained by width and max lines visible in preview
+  // Word-wrap constrained by width and max lines that fit in the box
   const words = text.split(" ");
   const lines: string[] = [];
   let line = "";
@@ -113,7 +114,7 @@ function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style
     const test = line ? line + " " + word : word;
     if (ctx.measureText(test).width > maxW && line) {
       lines.push(line);
-      if (lines.length >= maxLines) { line = ""; break; } // stop at max visible lines
+      if (lines.length >= maxLines) { line = ""; break; }
       line = word;
     } else line = test;
   }
@@ -149,7 +150,7 @@ async function exportVideoClientSide(
   videoUrl: string,
   subtitles: Subtitle[],
   style: SubStyle,
-  previewFontScale: number,
+  dispH: number,
   onProgress: (pct: number) => void
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -218,7 +219,7 @@ async function exportVideoClientSide(
         ctx.drawImage(vid, 0, 0, W, H);
         const t = vid.currentTime;
         const sub = subtitles.find(s => t >= s.start && t <= s.end);
-        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, previewFontScale);
+        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, dispH);
         onProgress(Math.min(99, Math.round((t / duration) * 100)));
         if (!finished && !vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
       };
@@ -498,8 +499,7 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
     if (!videoUrl) return;
     setClientProgress(0); setClientDone(false);
     try {
-      const exportFontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
-      const blob = await exportVideoClientSide(videoUrl, subtitles, style, exportFontScale, pct => setClientProgress(pct));
+      const blob = await exportVideoClientSide(videoUrl, subtitles, style, dispH > 0 ? dispH : nativeH, pct => setClientProgress(pct));
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
       setClientDone(true);
