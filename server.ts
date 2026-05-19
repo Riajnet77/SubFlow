@@ -71,6 +71,11 @@ function buildAss(subtitles: any[], style: any): string {
   const cx = Math.round(((box.x + box.w / 2) / 100) * browserW);
   const cy = Math.round(((box.y + box.h / 2) / 100) * browserH);
 
+  // Shadow: 1 = drop shadow, 0 = no shadow
+  const shadowDepth = style.preset === 'shadow' ? 3 : style.preset === 'neon' ? 0 : 1;
+  // Outline width: 0 = no outline, higher = thicker
+  const outlineWidth = bgOpacity > 0 ? 0 : 2;
+
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${browserW}
@@ -79,7 +84,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${fontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: Default,${fontName},${fontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
