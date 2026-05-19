@@ -4,14 +4,12 @@ import cors from 'cors';
 import multer from 'multer';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-ffmpeg.setFfprobePath(ffprobeInstaller.path);
 
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
 const upload = multer({
@@ -209,18 +207,7 @@ async function startServer() {
           .save(audioPath);
       });
 
-      // Validate duration — reject videos over 10 minutes
-      const duration = await new Promise<number>((res, rej) => {
-        ffmpeg.ffprobe(audioPath, (err, meta) => {
-          if (err) rej(err);
-          else res(meta.format.duration ?? 0);
-        });
-      });
-      if (duration > 600) {
-        cleanup();
-        return res.status(400).json({ error: `Video is too long (${Math.round(duration / 60)} min). Maximum is 10 minutes.` });
-      }
-      console.log(`[transcribe ${id}] Duration: ${Math.round(duration)}s. Sending to Groq Whisper...`);
+      console.log(`[transcribe ${id}] Audio ready. Sending to Groq Whisper...`);
 
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
