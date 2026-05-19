@@ -175,33 +175,16 @@ async function exportVideoClientSide(
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d")!;
 
-      // Capture audio via captureStream BEFORE muting
-      // captureStream on an unmuted element works, then we mute to silence speakers
-      const vidStream: MediaStream = (vid as any).captureStream();
-      vid.muted = true; // silence speakers after capturing stream
-
-      const canvasStream = canvas.captureStream(30);
-      vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
         MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" :
         "video/webm";
 
       const chunks: Blob[] = [];
-      const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
-
-      recorder.onstop = () => {
-        removeVid();
-        resolve(new Blob(chunks, { type: mimeType }));
-      };
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
-
-      const duration = vid.duration;
       let rafId = 0;
       let finished = false;
       let safetyTimer: ReturnType<typeof setTimeout>;
+      let recorder: MediaRecorder;
 
       const finish = () => {
         if (finished) return;
@@ -210,8 +193,10 @@ async function exportVideoClientSide(
         vid.pause();
         cancelAnimationFrame(rafId);
         ctx.drawImage(vid, 0, 0, W, H);
-        recorder.requestData();
-        recorder.stop();
+        if (recorder && recorder.state !== "inactive") {
+          recorder.requestData();
+          recorder.stop();
+        }
         onProgress(100);
       };
 
@@ -220,7 +205,7 @@ async function exportVideoClientSide(
         const t = vid.currentTime;
         const sub = subtitles.find(s => t >= s.start && t <= s.end);
         if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, dispH);
-        onProgress(Math.min(99, Math.round((t / duration) * 100)));
+        onProgress(Math.min(99, Math.round((t / vid.duration) * 100)));
         if (!finished && !vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
       };
 
@@ -232,19 +217,22 @@ async function exportVideoClientSide(
       vid.currentTime = 0;
       vid.play()
         .then(() => {
-          // Wait for first frame before starting recorder
-          const startRecording = () => {
-            ctx.drawImage(vid, 0, 0, W, H);
-            recorder.start(100);
-            rafId = requestAnimationFrame(drawFrame);
-            const safeDur = (isFinite(duration) ? duration : 300) + 8;
-            safetyTimer = setTimeout(finish, safeDur * 1000);
-          };
-          if (vid.readyState >= 2) {
-            startRecording();
-          } else {
-            vid.addEventListener('canplay', startRecording, { once: true });
-          }
+          // captureStream AFTER play() so audio track is live
+          const vidStream: MediaStream = (vid as any).captureStream();
+          const canvasStream = canvas.captureStream(30);
+          vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
+
+          recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
+          recorder.onstop = () => { removeVid(); resolve(new Blob(chunks, { type: mimeType })); };
+          recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+          recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
+
+          // Draw first frame, then start recording
+          ctx.drawImage(vid, 0, 0, W, H);
+          recorder.start(100);
+          rafId = requestAnimationFrame(drawFrame);
+          const safeDur = (isFinite(vid.duration) ? vid.duration : 300) + 8;
+          safetyTimer = setTimeout(finish, safeDur * 1000);
         })
         .catch(e => { removeVid(); reject(e); });
     };
