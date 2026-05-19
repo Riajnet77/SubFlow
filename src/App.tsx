@@ -84,163 +84,6 @@ function toTimecode(s: number) {
 }
 function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`; }
 
-// ─── Canvas subtitle renderer ─────────────────────────────────────────────────
-function drawSubtitleOnCanvas(ctx: CanvasRenderingContext2D, text: string, style: SubStyle, W: number, H: number, dispH: number) {
-  if (!text) return;
-
-  // The user positioned and sized the subtitle in the preview (dispH tall).
-  // style.fontSize is in "base units" — the preview renders it as fontSize*fontScale px.
-  // On the canvas (H px tall), we want the SAME visual proportion:
-  //   canvasFontPx = fontSize * fontScale * (H / dispH) = fontSize (math cancels)
-  // BUT the user may have a large font that wraps long text into many lines.
-  // We constrain ONLY by maxW (horizontal), not box height, so text always renders fully.
-  // fontSize is in preview screen px. Scale to canvas native px.
-  // canvas is H px tall, preview was dispH px tall.
-  const fs = Math.max(10, Math.round(style.fontSize * (H / dispH)));
-  const maxLines = Math.max(1, Math.floor((style.box.h / 100) * H / (fs * 1.25)));
-  const cx = ((style.box.x + style.box.w / 2) / 100) * W;
-  const cy = ((style.box.y + style.box.h / 2) / 100) * H;
-  const maxW = (style.box.w / 100) * W - 16;
-
-  ctx.font = `${fs}px "${style.fontName}", sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  // Word-wrap constrained by width and max lines that fit in the box
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? line + " " + word : word;
-    if (ctx.measureText(test).width > maxW && line) {
-      lines.push(line);
-      if (lines.length >= maxLines) { line = ""; break; }
-      line = word;
-    } else line = test;
-  }
-  if (line && lines.length < maxLines) lines.push(line);
-
-  const lineH = fs * 1.25;
-  const totalH = lineH * lines.length;
-  const startY = cy - totalH / 2 + lineH / 2;
-
-  lines.forEach((ln, i) => {
-    const y = startY + i * lineH;
-    const lw = ctx.measureText(ln).width;
-    const pad = 8;
-    if (style.bgOpacity > 0) {
-      ctx.save();
-      ctx.globalAlpha = style.bgOpacity;
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(cx - lw / 2 - pad, y - fs / 2 - pad / 2, lw + pad * 2, fs + pad);
-      ctx.restore();
-    }
-    ctx.strokeStyle = style.outlineColor;
-    ctx.lineWidth = Math.max(2, fs * 0.08);
-    ctx.lineJoin = "round";
-    ctx.strokeText(ln, cx, y);
-    ctx.fillStyle = style.primaryColor;
-    ctx.fillText(ln, cx, y);
-  });
-}
-
-// ─── Client-side video export ─────────────────────────────────────────────────
-// Creates a hidden <video> so export works even from the export step (editor unmounted)
-async function exportVideoClientSide(
-  videoUrl: string,
-  subtitles: Subtitle[],
-  style: SubStyle,
-  dispH: number,
-  onProgress: (pct: number) => void
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const vid = document.createElement("video");
-    vid.src = videoUrl;
-    vid.muted = true; // muted so browser doesn't play audio — AudioContext captures it independently
-    vid.playsInline = true;
-    vid.style.cssText = "position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0;";
-    document.body.appendChild(vid);
-
-    // cleanup only AFTER recorder has fully stopped and blob is ready
-    const removeVid = () => { try { document.body.removeChild(vid); } catch {} };
-
-    vid.onerror = () => { removeVid(); reject(new Error("Failed to load video for export.")); };
-
-    vid.onloadedmetadata = () => {
-      const W = vid.videoWidth;
-      const H = vid.videoHeight;
-      if (!W || !H) { removeVid(); return reject(new Error("Could not read video dimensions.")); }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = W; canvas.height = H;
-      const ctx = canvas.getContext("2d")!;
-
-      const mimeType =
-        MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
-        MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus") ? "video/webm;codecs=vp8,opus" :
-        "video/webm";
-
-      const chunks: Blob[] = [];
-      let rafId = 0;
-      let finished = false;
-      let safetyTimer: ReturnType<typeof setTimeout>;
-      let recorder: MediaRecorder;
-
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(safetyTimer);
-        vid.pause();
-        cancelAnimationFrame(rafId);
-        ctx.drawImage(vid, 0, 0, W, H);
-        if (recorder && recorder.state !== "inactive") {
-          recorder.requestData();
-          recorder.stop();
-        }
-        onProgress(100);
-      };
-
-      const drawFrame = () => {
-        ctx.drawImage(vid, 0, 0, W, H);
-        const t = vid.currentTime;
-        const sub = subtitles.find(s => t >= s.start && t <= s.end);
-        if (sub) drawSubtitleOnCanvas(ctx, sub.text, style, W, H, dispH);
-        onProgress(Math.min(99, Math.round((t / vid.duration) * 100)));
-        if (!finished && !vid.paused && !vid.ended) rafId = requestAnimationFrame(drawFrame);
-      };
-
-      vid.onended = finish;
-      vid.ontimeupdate = () => {
-        if (vid.currentTime >= vid.duration - 0.1) finish();
-      };
-
-      vid.currentTime = 0;
-      vid.play()
-        .then(() => {
-          // captureStream AFTER play() so audio track is live
-          const vidStream: MediaStream = (vid as any).captureStream();
-          const canvasStream = canvas.captureStream(30);
-          vidStream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-
-          recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 6_000_000 });
-          recorder.onstop = () => { removeVid(); resolve(new Blob(chunks, { type: mimeType })); };
-          recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-          recorder.onerror = (e: any) => { removeVid(); reject(e.error ?? e); };
-
-          // Draw first frame, then start recording
-          ctx.drawImage(vid, 0, 0, W, H);
-          recorder.start(100);
-          rafId = requestAnimationFrame(drawFrame);
-          const safeDur = (isFinite(vid.duration) ? vid.duration : 300) + 8;
-          safetyTimer = setTimeout(finish, safeDur * 1000);
-        })
-        .catch(e => { removeVid(); reject(e); });
-    };
-
-    vid.load();
-  });
-}
-
 // ─── SubtitleBox ──────────────────────────────────────────────────────────────
 function SubtitleBox({ text, style, onChange, fontScale }: {
   text: string; style: SubStyle; onChange: (s: SubStyle) => void; fontScale: number;
@@ -467,41 +310,21 @@ function CopyButton({ subtitles }: { subtitles: Subtitle[] }) {
 }
 
 // ─── ExportPanel ──────────────────────────────────────────────────────────────
-function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, nativeH, dispH }: {
+function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH }: {
   subtitles: Subtitle[]; videoFile: File | null;
-  videoUrl: string;
-  style: SubStyle; onBack: () => void; nativeW: number; nativeH: number; dispH: number;
+  style: SubStyle; onBack: () => void; nativeW: number; nativeH: number;
 }) {
-  const [clientProgress, setClientProgress] = useState<number | null>(null);
-  const [clientDone, setClientDone] = useState(false);
-  const [serverRendering, setServerRendering] = useState(false);
-  const [serverDone, setServerDone] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const [done, setDone] = useState(false);
 
   const dl = (url: string, name: string) => { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
   const post = (path: string, name: string) =>
     fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subtitles }) })
       .then(r => r.blob()).then(b => dl(URL.createObjectURL(b), name));
 
-  // Client-side: Canvas + MediaRecorder
-  const renderClient = async () => {
-    if (!videoUrl) return;
-    setClientProgress(0); setClientDone(false);
-    try {
-      const blob = await exportVideoClientSide(videoUrl, subtitles, style, dispH > 0 ? dispH : nativeH, pct => setClientProgress(pct));
-      const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-      dl(URL.createObjectURL(blob), `subflow_export.${ext}`);
-      setClientDone(true);
-    } catch (e: any) {
-      alert("Export failed: " + (e?.message ?? e));
-    } finally {
-      setClientProgress(null);
-    }
-  };
-
-  // Server-side: FFmpeg burn-in (guaranteed MP4, slower)
   const renderServer = async () => {
     if (!videoFile) return;
-    setServerRendering(true); setServerDone(false);
+    setRendering(true); setDone(false);
     try {
       const form = new FormData();
       form.append("video", videoFile);
@@ -510,15 +333,13 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
       const res = await fetch("/api/render", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       dl(URL.createObjectURL(await res.blob()), "subflow_export.mp4");
-      setServerDone(true);
+      setDone(true);
     } catch (e: any) {
-      alert("Server render failed: " + (e?.message ?? e));
+      alert("Render failed: " + (e?.message ?? e));
     } finally {
-      setServerRendering(false);
+      setRendering(false);
     }
   };
-
-  const isExporting = clientProgress !== null;
 
   return (
     <div className="export-panel">
@@ -528,34 +349,16 @@ function ExportPanel({ subtitles, videoFile, videoUrl, style, onBack, nativeW, n
         <button className="export-card" onClick={() => post("/api/export/srt", "subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
         <button className="export-card" onClick={() => post("/api/export/vtt", "subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
         <CopyButton subtitles={subtitles} />
-        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 9 }}>
-          {/* ── Recommended: client-side ── */}
-          <button
-            className={`export-card accent ${isExporting ? "loading" : ""} ${clientDone ? "done" : ""}`}
-            onClick={renderClient}
-            disabled={isExporting || serverRendering}
-          >
-            <span className="ei">{clientDone ? "✅" : isExporting ? "⏳" : "🎞️"}</span>
-            <span className="el">{clientDone ? "Downloaded!" : isExporting ? `Exporting… ${clientProgress}%` : "Burn to Video — fast, in browser"}</span>
-            <span className="ed">{isExporting ? "Running on your device — no upload" : clientDone ? "Saved to downloads" : "Runs entirely in your browser · instant start · WebM or MP4"}</span>
-            {isExporting && (
-              <div style={{ width: "100%", height: 3, background: "var(--brd)", borderRadius: 2, marginTop: 6 }}>
-                <div style={{ width: `${clientProgress}%`, height: "100%", background: "var(--amb)", borderRadius: 2, transition: "width .3s" }} />
-              </div>
-            )}
-          </button>
-
-          {/* ── Fallback: server-side ── */}
-          <button
-            className={`export-card ${serverRendering ? "loading" : ""} ${serverDone ? "done" : ""}`}
-            onClick={renderServer}
-            disabled={isExporting || serverRendering || !videoFile}
-          >
-            <span className="ei">{serverDone ? "✅" : serverRendering ? "⏳" : "🎬"}</span>
-            <span className="el">{serverDone ? "Downloaded!" : serverRendering ? "Rendering on server…" : "Burn to Video — server MP4"}</span>
-            <span className="ed">{serverRendering ? "FFmpeg encoding — may take a few minutes" : "Guaranteed MP4 · uses server CPU · slower but universal"}</span>
-          </button>
-        </div>
+        <button
+          className={`export-card accent ${rendering ? "loading" : ""} ${done ? "done" : ""}`}
+          onClick={renderServer}
+          disabled={rendering || !videoFile}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <span className="ei">{done ? "✅" : rendering ? "⏳" : "🎬"}</span>
+          <span className="el">{done ? "Downloaded!" : rendering ? "Rendering…" : "Burn to Video — MP4"}</span>
+          <span className="ed">{rendering ? "FFmpeg encoding on server…" : done ? "Saved to downloads" : "Embeds subtitles into MP4 · universal format"}</span>
+        </button>
       </div>
       <button className="btn-ghost" onClick={onBack}>← Back to editor</button>
     </div>
@@ -692,7 +495,7 @@ export default function App() {
 
           {step === "export" && (
             <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} videoUrl={videoUrl} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} dispH={dispH} />
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} />
             </div>
           )}
         </main>
