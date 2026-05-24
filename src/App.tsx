@@ -219,7 +219,7 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
   currentTime: number;
 }) {
   const [tab, setTab] = useState<"style" | "subs">("style");
-  const set = (p: Partial<SubStyle>) => onChange({ ...style, ...p, preset: "custom" });
+  const set = (p: Partial<SubStyle>) => onChange({ ...style, ...p, preset: 'fontSize' in p && Object.keys(p).length === 1 ? style.preset : "custom" });
   const applyPreset = (k: string) => onChange({ ...style, ...PRESETS[k], preset: k });
   const listRef = useRef<HTMLDivElement>(null);
   const activeIdx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
