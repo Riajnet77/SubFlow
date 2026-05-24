@@ -143,7 +143,6 @@ async function startServer() {
       // Write ASS subtitle file (better than SRT for styled subtitles)
       fs.writeFileSync(assPath, buildAss(subtitles, style));
 
-      console.log(`[render ${id}] style:`, JSON.stringify({preset: style.preset, fontSize: style.fontSize, browserW: style.browserW, browserH: style.browserH}));
       console.log(`[render ${id}] Starting encode...`);
 
       await new Promise<void>((resolve, reject) => {
