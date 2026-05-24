@@ -53,6 +53,10 @@ function buildAss(subtitles: any[], style: any): string {
     browserH = 720,
   } = style;
 
+  // fontSize is in preview screen px — scale to native video px
+  // ASS PlayRes matches browserW/browserH so fontSize maps 1:1 to screen px
+  // No scaling needed — ASS handles it via PlayResX/PlayResY
+
   // Convert CSS hex color to ASS &HAABBGGRR format
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
@@ -139,6 +143,7 @@ async function startServer() {
       // Write ASS subtitle file (better than SRT for styled subtitles)
       fs.writeFileSync(assPath, buildAss(subtitles, style));
 
+      console.log(`[render ${id}] style:`, JSON.stringify({preset: style.preset, fontSize: style.fontSize, browserW: style.browserW, browserH: style.browserH}));
       console.log(`[render ${id}] Starting encode...`);
 
       await new Promise<void>((resolve, reject) => {
