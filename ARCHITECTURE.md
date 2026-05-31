@@ -135,6 +135,18 @@ Segmentos longos fazem a legenda ficar na tela tempo demais e parecer desincroni
 
 ---
 
+## 10. ASS — usar resolução nativa do vídeo
+
+**Regra:** o `buildAss` deve usar `nativeW/nativeH` (resolução real do vídeo) para `PlayResX/PlayResY`, não `browserW/browserH` (tamanho do preview no browser).
+
+O FFmpeg aplica o ASS sobre o vídeo nativo. Se o `PlayRes` não bater com a resolução nativa, as coordenadas e o fontSize ficam errados.
+
+O `fontSize` deve ser escalado: `scaledFontSize = fontSize * (nativeH / browserH)`.
+
+O frontend envia ambos: `{ ...style, browserW, browserH, nativeW, nativeH }`.
+
+---
+
 ## Stack atual
 
 - **Frontend:** React + TypeScript + Vite
