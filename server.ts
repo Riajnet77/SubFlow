@@ -51,11 +51,17 @@ function buildAss(subtitles: any[], style: any): string {
     box = { x: 5, y: 78, w: 90, h: 14 },
     browserW = 1280,
     browserH = 720,
+    nativeW = 0,
+    nativeH = 0,
   } = style;
 
-  // fontSize is in preview screen px — scale to native video px
-  // ASS PlayRes matches browserW/browserH so fontSize maps 1:1 to screen px
-  // No scaling needed — ASS handles it via PlayResX/PlayResY
+  // Use native video resolution for ASS PlayRes so FFmpeg renders correctly.
+  // If nativeW/H not provided, fall back to browserW/H.
+  const playW = nativeW || browserW;
+  const playH = nativeH || browserH;
+
+  // fontSize is in browser preview px — scale to native video px
+  const scaledFontSize = Math.round(fontSize * (playH / browserH));
 
   // Convert CSS hex color to ASS &HAABBGGRR format
   const hexToAss = (hex: string, alpha = 0): string => {
@@ -72,8 +78,8 @@ function buildAss(subtitles: any[], style: any): string {
   const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1); // fully transparent if no bg
 
   // Box center in pixels
-  const cx = Math.round(((box.x + box.w / 2) / 100) * browserW);
-  const cy = Math.round(((box.y + box.h / 2) / 100) * browserH);
+  const cx = Math.round(((box.x + box.w / 2) / 100) * playW);
+  const cy = Math.round(((box.y + box.h / 2) / 100) * playH);
 
   // Shadow: 1 = drop shadow, 0 = no shadow
   const shadowDepth = style.preset === 'shadow' ? 3 : style.preset === 'neon' ? 0 : 1;
@@ -82,13 +88,13 @@ function buildAss(subtitles: any[], style: any): string {
 
   const header = `[Script Info]
 ScriptType: v4.00+
-PlayResX: ${browserW}
-PlayResY: ${browserH}
+PlayResX: ${playW}
+PlayResY: ${playH}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${fontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,10,10,10,1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
