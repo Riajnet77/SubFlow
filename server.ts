@@ -93,10 +93,11 @@ ScriptType: v4.00+
 PlayResX: ${playW}
 PlayResY: ${playH}
 ScaledBorderAndShadow: yes
+WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,10,10,10,1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,${Math.round(cx - (box.w/100)*playW/2)},${Math.round(cx - (box.w/100)*playW/2)},10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -109,29 +110,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return `${h}:${String(m).padStart(2, '0')}:${sec}`;
   };
 
-  // Max chars per line based on box width and font size
-  const charsPerLine = Math.floor((box.w / 100) * playW / (scaledFontSize * 0.55));
-
-  const wrapText = (text: string): string => {
-    const words = text.split(' ');
-    const lines: string[] = [];
-    let line = '';
-    for (const word of words) {
-      if ((line + ' ' + word).trim().length > charsPerLine && line) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = line ? line + ' ' + word : word;
-      }
-    }
-    if (line) lines.push(line);
-    return lines.join('\N'); // \N is ASS hard line break
-  };
-
   const events = subtitles
     .map(sub => {
       const posTag = `{\\pos(${cx},${cy})}`;
-      return `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${posTag}${wrapText(sub.text)}`;
+      return `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${posTag}${sub.text}`;
     })
     .join('\n');
 
