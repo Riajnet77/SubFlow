@@ -329,7 +329,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH }: 
       const form = new FormData();
       form.append("video", videoFile);
       form.append("subtitles", JSON.stringify(subtitles));
-      form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH: nativeH }));
+      form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH: nativeH, nativeW, nativeH }));
       const res = await fetch("/api/render", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       dl(URL.createObjectURL(await res.blob()), "subflow_export.mp4");
