@@ -56,12 +56,14 @@ function buildAss(subtitles: any[], style: any): string {
   } = style;
 
   // Use native video resolution for ASS PlayRes so FFmpeg renders correctly.
-  // If nativeW/H not provided, fall back to browserW/H.
   const playW = nativeW || browserW;
   const playH = nativeH || browserH;
 
-  // fontSize is in browser preview px — scale to native video px
-  const scaledFontSize = Math.round(fontSize * (playH / browserH));
+  // fontSize is in preview screen px (e.g. 38px on a 605px tall preview).
+  // ASS PlayRes = nativeW x nativeH, so we scale fontSize to native px:
+  // scaledFontSize = fontSize * (nativeH / dispH)
+  // browserH is sent as dispH from the frontend, so:
+  const scaledFontSize = Math.round(fontSize * (playH / (browserH || playH)));
 
   // Convert CSS hex color to ASS &HAABBGGRR format
   const hexToAss = (hex: string, alpha = 0): string => {
@@ -107,11 +109,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return `${h}:${String(m).padStart(2, '0')}:${sec}`;
   };
 
+  // Max chars per line based on box width and font size
+  const charsPerLine = Math.floor((box.w / 100) * playW / (scaledFontSize * 0.55));
+
+  const wrapText = (text: string): string => {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+      if ((line + ' ' + word).trim().length > charsPerLine && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = line ? line + ' ' + word : word;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.join('\N'); // \N is ASS hard line break
+  };
+
   const events = subtitles
     .map(sub => {
-      // Inline position override using {\pos(x,y)}
       const posTag = `{\\pos(${cx},${cy})}`;
-      return `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${posTag}${sub.text}`;
+      return `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${posTag}${wrapText(sub.text)}`;
     })
     .join('\n');
 
