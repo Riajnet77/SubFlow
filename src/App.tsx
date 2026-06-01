@@ -326,10 +326,14 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
     if (!videoFile) return;
     setRendering(true); setDone(false);
     try {
+      const fontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
+      const browserH = dispH > 0 ? dispH : nativeH;
+      const scaledPreview = Math.round(style.fontSize * fontScale * (nativeH / browserH) / 1.33);
+      console.log(`[export] fontSize=${style.fontSize} fontScale=${fontScale.toFixed(3)} browserH=${Math.round(browserH)} nativeH=${nativeH} → scaledFontSize=${scaledPreview}`);
       const form = new FormData();
       form.append("video", videoFile);
       form.append("subtitles", JSON.stringify(subtitles));
-      form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH: dispH > 0 ? dispH : nativeH, nativeW, nativeH, fontScale: dispH > 0 && nativeH > 0 ? dispH / nativeH : 1 }));
+      form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH, nativeW, nativeH, fontScale }));
       const res = await fetch("/api/render", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       dl(URL.createObjectURL(await res.blob()), "subflow_export.mp4");
