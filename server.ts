@@ -59,8 +59,11 @@ function buildAss(subtitles: any[], style: any): string {
 
   // Scale fontSize from preview px to native video px
   // What the user saw on screen: fontSize * fontScale px
-  // fontSize is already in native video px equivalent — use directly
-  const scaledFontSize = Math.round(fontSize);
+  // ASS fontSize = line height in script resolution pixels (Aegisub spec)
+  // PlayResY = nativeH, so: assFont = screenFontPx * (PlayResY / nativeH) = screenFontPx * 1 = screenFontPx
+  // screenFontPx = fontSize * fontScale (what user saw on screen)
+  const fontScaleVal = style.fontScale || 1;
+  const scaledFontSize = Math.round(fontSize * fontScaleVal);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
