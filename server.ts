@@ -49,23 +49,17 @@ function buildAss(subtitles: any[], style: any): string {
     outlineColor = '#000000',
     bgOpacity = 0,
     box = { x: 5, y: 78, w: 90, h: 14 },
-    browserW = 1280,
     browserH = 720,
     nativeW = 0,
     nativeH = 0,
   } = style;
 
-  // Use native video resolution for ASS PlayRes so FFmpeg renders correctly.
-  const playW = nativeW || browserW;
-  const playH = nativeH || browserH;
+  const playW = nativeW || 1280;
+  const playH = nativeH || 720;
 
-  // fontSize is in preview screen px (e.g. 38px on a 605px tall preview).
-  // ASS PlayRes = nativeW x nativeH, so we scale fontSize to native px:
-  // scaledFontSize = fontSize * (nativeH / dispH)
-  // browserH is sent as dispH from the frontend, so:
+  // Scale fontSize from preview px to native video px
   const scaledFontSize = Math.round(fontSize * (playH / (browserH || playH)));
 
-  // Convert CSS hex color to ASS &HAABBGGRR format
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
     const r = c.slice(0, 2);
@@ -77,16 +71,29 @@ function buildAss(subtitles: any[], style: any): string {
 
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
-  const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1); // fully transparent if no bg
+  const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
 
-  // Box center in pixels
-  const cx = Math.round(((box.x + box.w / 2) / 100) * playW);
-  const cy = Math.round(((box.y + box.h / 2) / 100) * playH);
-
-  // Shadow: 1 = drop shadow, 0 = no shadow
   const shadowDepth = style.preset === 'shadow' ? 3 : style.preset === 'neon' ? 0 : 1;
-  // Outline width: 0 = no outline, higher = thicker
   const outlineWidth = bgOpacity > 0 ? 0 : 2;
+
+  // Convert box % to pixel margins
+  // ASS Alignment=2 (bottom-center): MarginL/R limit horizontal width, MarginV = distance from bottom
+  // For center-aligned text at box position:
+  const marginL = Math.round((box.x / 100) * playW);
+  const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
+  const marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
+
+  // Alignment: 2=bottom-center, 5=middle-center, 8=top-center
+  // Pick based on vertical position of box
+  const boxCenterY = box.y + box.h / 2;
+  const alignment = boxCenterY < 35 ? 8 : boxCenterY > 65 ? 2 : 5;
+
+  const assTime = (s: number): string => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = (s % 60).toFixed(2).padStart(5, '0');
+    return `${h}:${String(m).padStart(2, '0')}:${sec}`;
+  };
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -97,24 +104,14 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},2,${Math.round(cx - (box.w/100)*playW/2)},${Math.round(cx - (box.w/100)*playW/2)},10,1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  const assTime = (s: number): string => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = (s % 60).toFixed(2).padStart(5, '0');
-    return `${h}:${String(m).padStart(2, '0')}:${sec}`;
-  };
-
   const events = subtitles
-    .map(sub => {
-      const posTag = `{\\pos(${cx},${cy})}`;
-      return `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${posTag}${sub.text}`;
-    })
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${sub.text}`)
     .join('\n');
 
   return header + events + '\n';
