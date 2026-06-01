@@ -58,9 +58,9 @@ function buildAss(subtitles: any[], style: any): string {
   const playH = nativeH || 720;
 
   // Scale fontSize from preview px to native video px
-  // fontSize is in preview screen px. Scale to native video px.
-  // Divide by 1.5 to compensate for ASS rendering larger than canvas rendering
-  const scaledFontSize = Math.round(fontSize * (playH / (browserH || playH)) / 1.5);
+  // ASS fontSize in PlayRes coordinate space = preview screen px * 0.75
+  // (ASS uses points not pixels; 1pt ≈ 1.33px, so fontSize_ass = fontSize_px * 0.75)
+  const scaledFontSize = Math.round(fontSize * 0.75);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
@@ -104,7 +104,7 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},0,0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${style.preset === 'bold' || (style.preset === 'custom' && fontName === 'Impact') ? '-1' : '0'},0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
