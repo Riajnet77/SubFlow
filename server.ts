@@ -59,13 +59,8 @@ function buildAss(subtitles: any[], style: any): string {
 
   // Scale fontSize from preview px to native video px
   // What the user saw on screen: fontSize * fontScale px
-  // ASS uses points (1pt = 1.33px), so divide by 1.33
-  // Then scale to PlayRes coordinate space: * (playH / dispH) where dispH = browserH
-  const fontScaleVal = style.fontScale || (browserH > 0 && nativeH > 0 ? browserH / nativeH : 1);
-  const screenFontPx = fontSize * fontScaleVal;
-  // ASS fontSize with ScaledBorderAndShadow=yes is in pixels relative to PlayRes, not points
-  // libass fontSize = screenFontPx directly (no conversion factor needed)
-  const scaledFontSize = Math.round(screenFontPx);
+  // fontSize is already in native video px equivalent — use directly
+  const scaledFontSize = Math.round(fontSize);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
@@ -87,11 +82,9 @@ function buildAss(subtitles: any[], style: any): string {
   // This gives us full control over vertical position without fighting ASS alignment logic
   const marginL = Math.round((box.x / 100) * playW);
   const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
-  // For alignment=5 (middle), MarginV shifts vertically — use box center Y as absolute position
-  // ASS doesn't support absolute Y with alignment=5 directly, so use alignment=2 (bottom)
-  // marginV for bottom alignment = distance from bottom to bottom of box
+  // alignment=2 (bottom-center): marginV = distance from bottom to bottom of box
   const marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
-  const alignment = 2; // always bottom-anchored, marginV controls vertical position
+  const alignment = 2;
 
   const assTime = (s: number): string => {
     const h = Math.floor(s / 3600);
