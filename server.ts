@@ -58,9 +58,12 @@ function buildAss(subtitles: any[], style: any): string {
   const playH = nativeH || 720;
 
   // Scale fontSize from preview px to native video px
-  // ASS fontSize in PlayRes coordinate space = preview screen px * 0.75
-  // (ASS uses points not pixels; 1pt ≈ 1.33px, so fontSize_ass = fontSize_px * 0.75)
-  const scaledFontSize = Math.round(fontSize * 0.75);
+  // What the user saw on screen: fontSize * fontScale px
+  // ASS uses points (1pt = 1.33px), so divide by 1.33
+  // Then scale to PlayRes coordinate space: * (playH / dispH) where dispH = browserH
+  const fontScaleVal = style.fontScale || (browserH > 0 && nativeH > 0 ? browserH / nativeH : 1);
+  const screenFontPx = fontSize * fontScaleVal;
+  const scaledFontSize = Math.round(screenFontPx * (playH / (browserH || playH)) / 1.33);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
