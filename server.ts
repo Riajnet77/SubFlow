@@ -58,7 +58,9 @@ function buildAss(subtitles: any[], style: any): string {
   const playH = nativeH || 720;
 
   // Scale fontSize from preview px to native video px
-  const scaledFontSize = Math.round(fontSize * (playH / (browserH || playH)));
+  // fontSize is in preview screen px. Scale to native video px.
+  // Divide by 1.5 to compensate for ASS rendering larger than canvas rendering
+  const scaledFontSize = Math.round(fontSize * (playH / (browserH || playH)) / 1.5);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
@@ -76,17 +78,15 @@ function buildAss(subtitles: any[], style: any): string {
   const shadowDepth = style.preset === 'shadow' ? 3 : style.preset === 'neon' ? 0 : 1;
   const outlineWidth = bgOpacity > 0 ? 0 : 2;
 
-  // Convert box % to pixel margins
-  // ASS Alignment=2 (bottom-center): MarginL/R limit horizontal width, MarginV = distance from bottom
-  // For center-aligned text at box position:
+  // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
+  // This gives us full control over vertical position without fighting ASS alignment logic
   const marginL = Math.round((box.x / 100) * playW);
   const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
+  // For alignment=5 (middle), MarginV shifts vertically — use box center Y as absolute position
+  // ASS doesn't support absolute Y with alignment=5 directly, so use alignment=2 (bottom)
+  // marginV for bottom alignment = distance from bottom to bottom of box
   const marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
-
-  // Alignment: 2=bottom-center, 5=middle-center, 8=top-center
-  // Pick based on vertical position of box
-  const boxCenterY = box.y + box.h / 2;
-  const alignment = boxCenterY < 35 ? 8 : boxCenterY > 65 ? 2 : 5;
+  const alignment = 2; // always bottom-anchored, marginV controls vertical position
 
   const assTime = (s: number): string => {
     const h = Math.floor(s / 3600);
