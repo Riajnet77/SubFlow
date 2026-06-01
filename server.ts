@@ -64,8 +64,8 @@ function buildAss(subtitles: any[], style: any): string {
   const fontScaleVal = style.fontScale || (browserH > 0 && nativeH > 0 ? browserH / nativeH : 1);
   const screenFontPx = fontSize * fontScaleVal;
   // ASS fontSize with ScaledBorderAndShadow=yes is in pixels relative to PlayRes, not points
-  // libass fontSize: screenFontPx * 0.9 matches CSS px rendering empirically
-  const scaledFontSize = Math.round(screenFontPx * 0.9);
+  // libass fontSize = screenFontPx directly (no conversion factor needed)
+  const scaledFontSize = Math.round(screenFontPx);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
