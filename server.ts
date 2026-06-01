@@ -151,6 +151,7 @@ async function startServer() {
       // Write ASS subtitle file (better than SRT for styled subtitles)
       fs.writeFileSync(assPath, buildAss(subtitles, style));
 
+      console.log(`[render ${id}] fontSize=${style.fontSize} fontScale=${style.fontScale} browserH=${style.browserH} nativeH=${style.nativeH} scaledFontSize=${Math.round((style.fontSize * (style.fontScale || 1)) * ((style.nativeH || style.browserH || 1) / (style.browserH || 1)) / 1.33)}`);
       console.log(`[render ${id}] Starting encode...`);
 
       await new Promise<void>((resolve, reject) => {
