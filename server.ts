@@ -78,8 +78,18 @@ function buildAss(subtitles: any[], style: any): string {
   const outlineAss = hexToAss(outlineColor, 0);
   const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
 
-  const shadowDepth = style.preset === 'shadow' ? 3 : style.preset === 'neon' ? 0 : 1;
-  const outlineWidth = bgOpacity > 0 ? 0 : 2;
+  // Map presets to ASS effects
+  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels'];
+  const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
+  const shadowDepth = style.preset === 'shadow' ? 4
+    : style.preset === 'neon' ? 0
+    : style.preset === 'karaoke' ? 2
+    : 1;
+  const outlineWidth = bgOpacity > 0 ? 0
+    : style.preset === 'neon' ? 3
+    : style.preset === 'bold' ? 3
+    : style.preset === 'karaoke' ? 2
+    : 2;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
@@ -105,7 +115,7 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${style.preset === 'bold' || (style.preset === 'custom' && fontName === 'Impact') ? '-1' : '0'},0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -284,7 +294,7 @@ async function startServer() {
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
 
-        const BATCH_SIZE = 20;
+        const BATCH_SIZE = 15;
         const translationMap = new Map<number, string>();
 
         const translateBatch = async (batchSegments: typeof segments, offset: number) => {
@@ -295,18 +305,21 @@ async function startServer() {
               {
                 role: 'system',
                 content: `Translate each subtitle line to ${targetLang}.
-Each line starts with a number and ||| separator. Keep the exact same format.
-Return ONLY the translated lines with their numbers, nothing else.
+Rules:
+- Each line starts with a number and ||| separator. Keep the exact same format.
+- Keep translations CONCISE — same length or shorter than the original. Use natural contractions.
+- Never add words not in the original. Prioritize brevity over literal accuracy.
+- Return ONLY the translated lines with their numbers, nothing else.
 Example:
 Input:  1|||Hello world
-        2|||How are you
+        2|||How are you doing today
 Output: 1|||Olá mundo
         2|||Como vai você`,
               },
               { role: 'user', content: numbered },
             ],
             temperature: 0.1,
-            max_tokens: 2048,
+            max_tokens: 8192,
           });
           const raw = chat.choices[0]?.message?.content ?? '';
           for (const line of raw.split('\n')) {
