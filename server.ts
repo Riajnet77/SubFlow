@@ -249,7 +249,7 @@ async function startServer() {
         try {
           transcription = await groq.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
-            model: 'whisper-large-v3',
+            model: 'whisper-large-v3-turbo',
             response_format: 'verbose_json',
             timestamp_granularities: ['segment'],
           });
