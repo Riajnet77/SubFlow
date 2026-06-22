@@ -251,7 +251,7 @@ async function startServer() {
             file: fs.createReadStream(audioPath),
             model: 'whisper-large-v3',
             response_format: 'verbose_json',
-            timestamp_granularities: ['segment', 'word'],
+            timestamp_granularities: ['segment'],
           });
           break;
         } catch (e: any) {
