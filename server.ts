@@ -223,7 +223,7 @@ async function startServer() {
         ffmpeg(inputPath)
           .noVideo()
           .audioCodec('libmp3lame')
-          .audioBitrate(64)
+          .audioBitrate(128)
           // NO audioFrequency() resampling — it shifts pts and causes progressive drift
           // aresample=async=1 fixes irregular pts from VFR sources (Instagram, TikTok, etc.)
           .audioChannels(1)
