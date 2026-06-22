@@ -223,7 +223,7 @@ async function startServer() {
         ffmpeg(inputPath)
           .noVideo()
           .audioCodec('libmp3lame')
-          .audioBitrate(128)
+          .audioBitrate(64)
           // NO audioFrequency() resampling — it shifts pts and causes progressive drift
           // aresample=async=1 fixes irregular pts from VFR sources (Instagram, TikTok, etc.)
           .audioChannels(1)
@@ -233,17 +233,33 @@ async function startServer() {
           .save(audioPath);
       });
 
-      console.log(`[transcribe ${id}] Audio ready. Sending to Groq Whisper...`);
+      const audioSize = fs.statSync(audioPath).size;
+      console.log(`[transcribe ${id}] Audio ready. Size: ${(audioSize / 1024 / 1024).toFixed(1)}MB. Sending to Groq Whisper...`);
+
+      if (audioSize > 24 * 1024 * 1024) {
+        cleanup();
+        return res.status(400).json({ error: 'Audio too large for transcription (max ~10 min). Please use a shorter video.' });
+      }
 
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-      // Step 1 — transcribe with word-level timestamps for precise splitting
-      const transcription = await groq.audio.transcriptions.create({
-        file: fs.createReadStream(audioPath),
-        model: 'whisper-large-v3',
-        response_format: 'verbose_json',
-        timestamp_granularities: ['segment', 'word'],
-      });
+      // Step 1 — transcribe with retry on premature close
+      let transcription: any;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          transcription = await groq.audio.transcriptions.create({
+            file: fs.createReadStream(audioPath),
+            model: 'whisper-large-v3',
+            response_format: 'verbose_json',
+            timestamp_granularities: ['segment', 'word'],
+          });
+          break;
+        } catch (e: any) {
+          console.warn(`[transcribe ${id}] Whisper attempt ${attempt} failed:`, e.message);
+          if (attempt === 3) throw e;
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
+      }
 
       const rawSegments: Array<{ start: number; end: number; text: string }> =
         (transcription as any).segments ?? [];
