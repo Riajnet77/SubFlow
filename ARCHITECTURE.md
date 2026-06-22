@@ -147,6 +147,20 @@ O frontend envia ambos: `{ ...style, browserW, browserH, nativeW, nativeH }`.
 
 ---
 
+## 11. Node.js — fixar na versão 20 LTS
+
+**Regra:** manter `"node": "20.x"` no `package.json`. **Nunca** usar `>=20.0.0` ou versões mais novas sem testar.
+
+Node.js 24.17.0+ introduziu uma regressão no `node-fetch` com keep-alive sockets que causa `ERR_STREAM_PREMATURE_CLOSE` de forma confiável em todas as chamadas HTTP externas (Groq, etc). O bug afeta Linux e Windows e é platform-independent.
+
+O Render por padrão usa a versão mais recente disponível — com `>=20.0.0` ele pegou Node 26.3.0 que tem o bug. Com `20.x` fica na LTS estável.
+
+**Sintoma:** `Invalid response body while trying to fetch: Premature close` em todas as chamadas à API do Groq, independente do conteúdo ou tamanho.
+
+**Diagnóstico:** verificar a versão do Node nos logs do Render: `Using Node.js version X.X.X`. Se for 24.17.0+, esse é o problema.
+
+---
+
 ## Stack atual
 
 - **Frontend:** React + TypeScript + Vite
