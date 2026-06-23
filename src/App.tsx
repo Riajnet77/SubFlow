@@ -333,6 +333,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
     setRendering(true); setDone(false);
     try {
       const fontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
+      console.log('[export] preset:', style.preset, 'fontName:', style.fontName);
       const browserH = dispH > 0 ? dispH : nativeH;
       const scaledPreview = Math.round(style.fontSize * fontScale * (nativeH / browserH) / 1.33);
       console.log(`[export] fontSize=${style.fontSize} fontScale=${fontScale.toFixed(3)} browserH=${Math.round(browserH)} nativeH=${nativeH} → scaledFontSize=${scaledPreview}`);
