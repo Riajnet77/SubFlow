@@ -78,17 +78,26 @@ function buildAss(subtitles: any[], style: any): string {
   const outlineAss = hexToAss(outlineColor, 0);
   const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
 
-  // Map presets to ASS effects
+  // Map presets to ASS effects — matching CSS preview as closely as possible
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels'];
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
-  const shadowDepth = style.preset === 'shadow' ? 4
+
+  // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
+  // neon preset: thick colored outline, no shadow
+  // bold preset: thick outline, no shadow
+  // others: standard outline + minimal shadow
+  const shadowDepth = bgOpacity > 0 ? 0
+    : style.preset === 'shadow' ? 2
     : style.preset === 'neon' ? 0
-    : style.preset === 'karaoke' ? 2
-    : 1;
+    : style.preset === 'karaoke' ? 1
+    : style.preset === 'matrix' ? 2
+    : 0;
+
   const outlineWidth = bgOpacity > 0 ? 0
     : style.preset === 'neon' ? 3
-    : style.preset === 'bold' ? 3
-    : style.preset === 'karaoke' ? 2
+    : style.preset === 'bold' ? 2
+    : style.preset === 'shadow' ? 1
+    : style.preset === 'minimal' ? 1
     : 2;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
