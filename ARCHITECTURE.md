@@ -7,6 +7,22 @@ Cada regra aqui existe porque um bug já foi corrigido e não deve voltar.
 
 ## 1. fontSize — unidade e conversão
 
+**Regra:** `scaledFontSize` no ASS = `fontSize * fontScale`.
+
+`fontScale` é enviado pelo frontend e representa a proporção entre o tamanho de exibição do vídeo no preview e a resolução nativa. É o fator exato que o browser usa para renderizar a fonte.
+
+```ts
+// CORRETO — pixel-perfect com o preview
+const scaledFontSize = Math.round(fontSize * fontScaleVal);
+
+// ERRADO — matematicamente "correto" mas visualmente maior que o preview
+const scaledFontSize = Math.round(fontSize); // ignora fontScale
+```
+
+**Por que `fontSize` direto está errado:** o ASS com `PlayResY=nativeH` mapeia fontSize 1:1 para pixels nativos do vídeo. Mas o usuário viu `fontSize * fontScale` pixels na tela — que é menor. Usar `fontSize` direto produz texto maior no export do que no preview, enganando o usuário.
+
+## 1b. fontSize — unidade e conversão (original)
+
 **Regra:** `style.fontSize` é sempre em **pixels de tela de preview**.
 
 - No preview (CSS/HTML): renderiza como `fontSize * fontScale` px — já feito pelo `SubtitleBox`
