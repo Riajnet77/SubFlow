@@ -86,16 +86,18 @@ function buildAss(subtitles: any[], style: any): string {
   // neon preset: thick colored outline, no shadow
   // bold preset: thick outline, no shadow
   // others: standard outline + minimal shadow
-  // CSS preview uses text-shadow in 4 directions = outline effect, NOT directional shadow
-  // ASS Shadow = directional drop shadow (different from CSS)
-  // ASS Outline = border around text (matches CSS text-shadow in 4 directions)
-  const shadowDepth = 0; // no directional shadow — matches CSS preview
+  // Shadow depth: ASS shadow is directional drop shadow
+  const shadowDepth = bgOpacity > 0 ? 0
+    : style.preset === 'shadow' ? 3
+    : style.preset === 'matrix' ? 2
+    : style.preset === 'neon' ? 0
+    : 0;
 
   const outlineWidth = bgOpacity > 0 ? 0
     : style.preset === 'minimal' ? 1
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
-    : 2; // all other presets use standard 2px outline
+    : 2;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
