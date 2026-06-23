@@ -123,7 +123,7 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
     if (type === "s") { nb.h = sb.h + dy; }
     if (type === "e") { nb.w = sb.w + dx; }
     if (type === "w") { nb.x = sb.x + dx; nb.w = sb.w - dx; }
-    onChange({ ...style, box: clamp(nb), preset: "custom" });
+    onChange({ ...style, box: clamp(nb) }); // preserve preset when moving box
   };
   const pu = () => { drag.current = null; };
 
@@ -219,7 +219,13 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
   currentTime: number;
 }) {
   const [tab, setTab] = useState<"style" | "subs">("style");
-  const set = (p: Partial<SubStyle>) => onChange({ ...style, ...p, preset: 'fontSize' in p && Object.keys(p).length === 1 ? style.preset : "custom" });
+  const set = (p: Partial<SubStyle>) => {
+    // Only reset preset to 'custom' when visual identity changes (color, font, background)
+    // Preserve preset for size-only or position-only changes
+    const visualKeys = ['primaryColor', 'outlineColor', 'bgOpacity', 'fontName'];
+    const changesVisual = Object.keys(p).some(k => visualKeys.includes(k));
+    onChange({ ...style, ...p, preset: changesVisual ? "custom" : style.preset });
+  };
   const applyPreset = (k: string) => onChange({ ...style, ...PRESETS[k], preset: k });
   const listRef = useRef<HTMLDivElement>(null);
   const activeIdx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
