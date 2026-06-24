@@ -43,7 +43,7 @@ function buildSrt(subtitles: any[]): string {
  */
 function buildAss(subtitles: any[], style: any): string {
   const {
-    fontName = 'Arial',
+    fontName: rawFontName = 'Arial',
     fontSize = 26,
     primaryColor = '#FFFFFF',
     outlineColor = '#000000',
@@ -78,6 +78,7 @@ function buildAss(subtitles: any[], style: any): string {
     return `&H${a}${b}${g}${r}`.toUpperCase();
   };
 
+  const fontName = rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
   const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
@@ -186,7 +187,7 @@ async function startServer() {
 
             // ── Subtitle burn-in ──────────────────────────────────────────
             // ass filter with fontsdir fallback — avoids libass font scan stall
-            `-vf ass=${assPath}`,
+            `-vf ass=${assPath}:fontsdir=${path.join(process.cwd(), 'fonts')}`,
 
             // ── Audio: copy stream, never re-encode ───────────────────────
             '-c:a copy',
