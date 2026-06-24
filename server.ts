@@ -78,7 +78,17 @@ function buildAss(subtitles: any[], style: any): string {
     return `&H${a}${b}${g}${r}`.toUpperCase();
   };
 
-  const fontName = rawFontName;
+  // Map CSS font names to actual TTF filenames uploaded to repo root
+  const FONT_MAP: Record<string, string> = {
+    'Impact': 'IMPACT',
+    'Arial': 'ARIAL',
+    'Georgia': 'GEORGIA',
+    'Verdana': 'VERDANA',
+    'Trebuchet MS': 'TREBUC',
+    'Tahoma': 'TAHOMA',
+    'Courier New': 'COUR',
+  };
+  const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
   const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
@@ -187,7 +197,7 @@ async function startServer() {
 
             // ── Subtitle burn-in ──────────────────────────────────────────
             // ass filter with fontsdir fallback — avoids libass font scan stall
-            `-vf ass=${assPath}:fontsdir=${path.join(process.cwd(), 'fonts')}`,
+            `-vf ass=${assPath}:fontsdir=${process.cwd()}`,
 
             // ── Audio: copy stream, never re-encode ───────────────────────
             '-c:a copy',
