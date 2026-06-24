@@ -66,8 +66,13 @@ function buildAss(subtitles: any[], style: any): string {
   // When fontScale = browserH/nativeH: = fontSize * (browserH/nativeH) * (nativeH/browserH) = fontSize
   // BUT fontScale is NOT always browserH/nativeH — it depends on how the video fits the container.
   // Use the actual fontScale sent from frontend for pixel-perfect match.
-  const fontScaleVal = style.fontScale || 1;
-  const scaledFontSize = Math.round(fontSize * fontScaleVal);
+  // fontSize is in preview px. Preview height = browserH, native height = nativeH (= playH).
+  // User saw: fontSize * fontScale px on screen (fontScale = browserH / nativeH)
+  // ASS with PlayResY=nativeH maps fontSize 1:1 to native px.
+  // To match preview: scaledFontSize = fontSize * fontScale * (nativeH / browserH)
+  //                                  = fontSize * (browserH/nativeH) * (nativeH/browserH)
+  //                                  = fontSize
+  const scaledFontSize = Math.round(fontSize);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
