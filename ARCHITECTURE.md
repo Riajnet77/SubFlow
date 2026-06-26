@@ -177,6 +177,36 @@ O Render por padrão usa a versão mais recente disponível — com `>=20.0.0` e
 
 ---
 
+## 12. Export — arquitetura async com polling
+
+**Regra:** o endpoint `/api/render` retorna imediatamente com um `jobId`. O frontend faz polling em `/api/render/:id/status` a cada 3 segundos até `status === 'done'`, então baixa em `/api/render/:id/download`.
+
+**Nunca** voltar para o modelo síncrono (aguardar a resposta HTTP do render). O Render free tier tem timeout de ~30s por requisição — o FFmpeg demora mais que isso para vídeos de 1+ minuto.
+
+Fluxo:
+1. `POST /api/render` → retorna `{ jobId }` imediatamente
+2. `GET /api/render/:id/status` → `{ status: 'processing' | 'done' | 'error' }`
+3. `GET /api/render/:id/download` → stream do MP4 final
+
+Jobs ficam em memória (`Map`). O arquivo é deletado após o download.
+
+## 13. Fontes — commitar TTF no repositório
+
+**Regra:** todas as fontes usadas nos presets devem estar na **raiz do repositório** como arquivos TTF. O FFmpeg usa `fontsdir=${process.cwd()}` para encontrá-las.
+
+Fontes necessárias (já commitadas):
+- `IMPACT.TTF` — Impact, Bold, Fire, Shadow, Karaoke, Retro, Purple, Reels
+- `ARIAL.TTF` — Neon, Ice, Minimal, Classic, Pink, Green, Dark Box, White Box
+- `GEORGIA.TTF` — Cinema, Elegant
+- `COUR.TTF` — Matrix
+- `VERDANA.TTF` — Verdana
+- `TAHOMA.TTF` — Tahoma
+- `TREBUC.TTF` — Trebuchet MS
+
+**Nunca** depender de fontes do sistema no Render — elas não existem.
+
+---
+
 ## Stack atual
 
 - **Frontend:** React + TypeScript + Vite
