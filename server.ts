@@ -165,69 +165,84 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // ── Job store (in-memory) ──────────────────────────────────────────────────
+  type JobStatus = 'processing' | 'done' | 'error';
+  const jobs = new Map<string, { status: JobStatus; error?: string; outputPath?: string }>();
+
   // ── /api/render ────────────────────────────────────────────────────────────
   app.post('/api/render', upload.single('video'), async (req, res) => {
-    const tmpFiles: string[] = [];
-    const cleanup = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
-
-    try {
-      if (!req.file || !req.body.subtitles) {
-        return res.status(400).json({ error: 'Video file and subtitles are required' });
-      }
-
-      const subtitles: any[] = JSON.parse(req.body.subtitles);
-      const style = req.body.style ? JSON.parse(req.body.style) : {};
-
-      const id = uuidv4();
-      const inputPath = req.file.path;
-      const assPath = `/tmp/${id}.ass`;
-      const outputPath = `/tmp/${id}_output.mp4`;
-      tmpFiles.push(inputPath, assPath, outputPath);
-
-      // Write ASS subtitle file (better than SRT for styled subtitles)
-      fs.writeFileSync(assPath, buildAss(subtitles, style));
-
-      console.log(`[render ${id}] fontSize=${style.fontSize} fontScale=${style.fontScale} browserH=${style.browserH} nativeH=${style.nativeH} scaledFontSize=${Math.round((style.fontSize * (style.fontScale || 1)) * ((style.nativeH || style.browserH || 1) / (style.browserH || 1)) / 1.33)}`);
-      console.log(`[render ${id}] Starting encode...`);
-
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(inputPath)
-          .outputOptions([
-            // ── Speed optimisations for low-CPU environments ──────────────
-            '-c:v libx264',
-            '-preset ultrafast',   // fastest encode, bigger file — acceptable for exports
-            '-crf 23',             // quality unchanged from source
-            '-threads 1',          // single thread is faster than context-switching on 0.1 CPU
-            '-tune fastdecode',    // skip b-frames analysis
-
-            // ── Subtitle burn-in ──────────────────────────────────────────
-            // ass filter with fontsdir fallback — avoids libass font scan stall
-            `-vf ass=${assPath}:fontsdir=${process.cwd()}`,
-
-            // ── Audio: copy stream, never re-encode ───────────────────────
-            '-c:a copy',
-
-            // ── Container ─────────────────────────────────────────────────
-            '-movflags +faststart', // moov atom at front — browser can stream before full download
-            '-f mp4',
-          ])
-          .on('start', cmd => console.log(`[render ${id}] ffmpeg:`, cmd))
-          .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
-          .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
-          .on('error', reject)
-          .save(outputPath);
-      });
-
-      res.download(outputPath, 'subflow_export.mp4', err => {
-        if (err) console.error(`[render ${id}] download error:`, err);
-        cleanup();
-      });
-
-    } catch (e: any) {
-      console.error('[render] Error:', e);
-      cleanup();
-      if (!res.headersSent) res.status(500).json({ error: e.message || 'Rendering failed' });
+    if (!req.file || !req.body.subtitles) {
+      return res.status(400).json({ error: 'Video file and subtitles are required' });
     }
+
+    const subtitles: any[] = JSON.parse(req.body.subtitles);
+    const style = req.body.style ? JSON.parse(req.body.style) : {};
+    const id = uuidv4();
+    const inputPath = req.file.path;
+    const assPath = `/tmp/${id}.ass`;
+    const outputPath = `/tmp/${id}_output.mp4`;
+
+    jobs.set(id, { status: 'processing' });
+    res.json({ jobId: id }); // respond immediately — client will poll
+
+    // Process in background
+    (async () => {
+      try {
+        fs.writeFileSync(assPath, buildAss(subtitles, style));
+        console.log(`[render ${id}] Starting encode...`);
+
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg(inputPath)
+            .outputOptions([
+              '-c:v libx264',
+              '-preset ultrafast',
+              '-crf 23',
+              '-threads 1',
+              '-tune fastdecode',
+              `-vf ass=${assPath}:fontsdir=${process.cwd()}`,
+              '-c:a copy',
+              '-movflags +faststart',
+              '-f mp4',
+            ])
+            .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
+            .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
+            .on('error', reject)
+            .save(outputPath);
+        });
+
+        jobs.set(id, { status: 'done', outputPath });
+        // Clean up input files
+        try { fs.unlinkSync(inputPath); } catch {}
+        try { fs.unlinkSync(assPath); } catch {}
+      } catch (e: any) {
+        console.error(`[render ${id}] Error:`, e);
+        jobs.set(id, { status: 'error', error: e.message });
+        try { fs.unlinkSync(inputPath); } catch {}
+        try { fs.unlinkSync(assPath); } catch {}
+        try { fs.unlinkSync(outputPath); } catch {}
+      }
+    })();
+  });
+
+  // ── /api/render/:id/status ─────────────────────────────────────────────────
+  app.get('/api/render/:id/status', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    res.json({ status: job.status, error: job.error });
+  });
+
+  // ── /api/render/:id/download ───────────────────────────────────────────────
+  app.get('/api/render/:id/download', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job || job.status !== 'done' || !job.outputPath) {
+      return res.status(404).json({ error: 'File not ready' });
+    }
+    res.download(job.outputPath, 'subflow_export.mp4', err => {
+      if (err) console.error(`[render ${req.params.id}] download error:`, err);
+      // cleanup after download
+      try { fs.unlinkSync(job.outputPath!); } catch {}
+      jobs.delete(req.params.id);
+    });
   });
 
   // ── /api/transcribe ────────────────────────────────────────────────────────
@@ -445,6 +460,15 @@ Output: 1|||Olá mundo
     app.use(express.static(distPath));
     app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
+
+  // Increase timeout for render requests (FFmpeg can take >30s)
+  app.use((req, res, next) => {
+    if (req.path === '/api/render') {
+      req.socket.setTimeout(300000); // 5 minutes
+      res.setTimeout(300000);
+    }
+    next();
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`SubFlow server running on http://localhost:${PORT}`);
