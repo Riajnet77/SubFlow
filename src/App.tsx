@@ -333,17 +333,39 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
     setRendering(true); setDone(false);
     try {
       const fontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
-      console.log('[export] preset:', style.preset, 'fontName:', style.fontName);
       const browserH = dispH > 0 ? dispH : nativeH;
-      const scaledPreview = Math.round(style.fontSize * fontScale * (nativeH / browserH) / 1.33);
-      console.log(`[export] fontSize=${style.fontSize} fontScale=${fontScale.toFixed(3)} browserH=${Math.round(browserH)} nativeH=${nativeH} → scaledFontSize=${scaledPreview}`);
       const form = new FormData();
       form.append("video", videoFile);
       form.append("subtitles", JSON.stringify(subtitles));
       form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH, nativeW, nativeH, fontScale }));
+
+      // Step 1: submit job — returns immediately with jobId
       const res = await fetch("/api/render", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
-      dl(URL.createObjectURL(await res.blob()), "subflow_export.mp4");
+      const { jobId } = await res.json();
+
+      // Step 2: poll status every 3 seconds
+      await new Promise<void>((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/render/${jobId}/status`);
+            const { status, error } = await statusRes.json();
+            if (status === 'done') {
+              clearInterval(interval);
+              resolve();
+            } else if (status === 'error') {
+              clearInterval(interval);
+              reject(new Error(error || 'Render failed'));
+            }
+          } catch (e) {
+            clearInterval(interval);
+            reject(e);
+          }
+        }, 3000);
+      });
+
+      // Step 3: download
+      dl(`/api/render/${jobId}/download`, "subflow_export.mp4");
       setDone(true);
     } catch (e: any) {
       alert("Render failed: " + (e?.message ?? e));
