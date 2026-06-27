@@ -369,6 +369,7 @@ async function startServer() {
       let segments = splitSegments;
 
       // Step 3 — translate in batches of 20 to avoid LLM line-skipping on large inputs
+      console.log(`[transcribe ${id}] targetLang=${targetLang} segments=${segments.length}`);
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
 
@@ -397,7 +398,7 @@ Output: 1|||Olá mundo
               { role: 'user', content: numbered },
             ],
             temperature: 0.1,
-            max_tokens: 8192,
+            max_tokens: 4096,
           });
           const raw = chat.choices[0]?.message?.content ?? '';
           for (const line of raw.split('\n')) {
