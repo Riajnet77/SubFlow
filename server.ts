@@ -315,7 +315,7 @@ async function startServer() {
 
       for (const seg of rawSegments) {
         const dur = seg.end - seg.start;
-        if (dur <= MAX_SEG_DURATION || words.length === 0) {
+        if (dur <= MAX_SEG_DURATION) {
           splitSegments.push(seg);
           continue;
         }
