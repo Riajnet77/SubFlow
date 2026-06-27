@@ -321,7 +321,41 @@ async function startServer() {
         }
         // Get words that belong to this segment
         const segWords = words.filter(w => w.start >= seg.start && w.end <= seg.end + 0.1);
-        if (segWords.length === 0) { splitSegments.push(seg); continue; }
+
+        if (segWords.length === 0) {
+          // No word timestamps — split by sentence punctuation or equal time chunks
+          const sentences = seg.text.split(/(?<=[.!?,])\s+/);
+          if (sentences.length > 1) {
+            const timePerChar = dur / seg.text.length;
+            let pos = seg.start;
+            for (const sentence of sentences) {
+              const sentDur = sentence.length * timePerChar;
+              splitSegments.push({
+                start: pos,
+                end: Math.min(pos + sentDur, seg.end),
+                text: sentence.trim(),
+              });
+              pos += sentDur;
+            }
+          } else {
+            // Split into equal time chunks
+            const numChunks = Math.ceil(dur / MAX_SEG_DURATION);
+            const chunkDur = dur / numChunks;
+            const wordsInSeg = seg.text.split(' ');
+            const wordsPerChunk = Math.ceil(wordsInSeg.length / numChunks);
+            for (let i = 0; i < numChunks; i++) {
+              const chunkWords = wordsInSeg.slice(i * wordsPerChunk, (i + 1) * wordsPerChunk);
+              if (chunkWords.length > 0) {
+                splitSegments.push({
+                  start: seg.start + i * chunkDur,
+                  end: seg.start + (i + 1) * chunkDur,
+                  text: chunkWords.join(' ').trim(),
+                });
+              }
+            }
+          }
+          continue;
+        }
 
         // Group words into chunks of ~MAX_SEG_DURATION seconds
         let chunk: typeof segWords = [];
@@ -387,14 +421,21 @@ Output: 1|||Olá mundo
           }
         };
 
-        // Process batches sequentially
+        // Process batches sequentially with retry
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
           const batch = segments.slice(i, i + BATCH_SIZE);
-          try {
-            await translateBatch(batch, i);
-          } catch (e) {
-            console.warn(`[transcribe ${id}] Batch ${i}-${i + BATCH_SIZE} failed, keeping original:`, e);
+          let success = false;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              await translateBatch(batch, i);
+              success = true;
+              break;
+            } catch (e) {
+              console.warn(`[transcribe ${id}] Batch ${i} attempt ${attempt} failed:`, e);
+              if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+            }
           }
+          if (!success) console.warn(`[transcribe ${id}] Batch ${i} failed after retries, keeping original`);
         }
 
         segments = segments.map((s, i) => ({
