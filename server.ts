@@ -324,34 +324,19 @@ async function startServer() {
 
         if (segWords.length === 0) {
           // No word timestamps — split by sentence punctuation or equal time chunks
-          const sentences = seg.text.split(/(?<=[.!?,])\s+/);
-          if (sentences.length > 1) {
-            const timePerChar = dur / seg.text.length;
-            let pos = seg.start;
-            for (const sentence of sentences) {
-              const sentDur = sentence.length * timePerChar;
+          // Split by words into chunks of MAX_SEG_DURATION seconds
+          const allWords = seg.text.trim().split(' ').filter(Boolean);
+          const numChunks = Math.max(1, Math.ceil(dur / MAX_SEG_DURATION));
+          const wordsPerChunk = Math.ceil(allWords.length / numChunks);
+          const chunkDur = dur / numChunks;
+          for (let i = 0; i < numChunks; i++) {
+            const chunkWords = allWords.slice(i * wordsPerChunk, (i + 1) * wordsPerChunk);
+            if (chunkWords.length > 0) {
               splitSegments.push({
-                start: pos,
-                end: Math.min(pos + sentDur, seg.end),
-                text: sentence.trim(),
+                start: seg.start + i * chunkDur,
+                end: Math.min(seg.start + (i + 1) * chunkDur, seg.end),
+                text: chunkWords.join(' ').trim(),
               });
-              pos += sentDur;
-            }
-          } else {
-            // Split into equal time chunks
-            const numChunks = Math.ceil(dur / MAX_SEG_DURATION);
-            const chunkDur = dur / numChunks;
-            const wordsInSeg = seg.text.split(' ');
-            const wordsPerChunk = Math.ceil(wordsInSeg.length / numChunks);
-            for (let i = 0; i < numChunks; i++) {
-              const chunkWords = wordsInSeg.slice(i * wordsPerChunk, (i + 1) * wordsPerChunk);
-              if (chunkWords.length > 0) {
-                splitSegments.push({
-                  start: seg.start + i * chunkDur,
-                  end: seg.start + (i + 1) * chunkDur,
-                  text: chunkWords.join(' ').trim(),
-                });
-              }
             }
           }
           continue;
