@@ -430,8 +430,43 @@ Output: 1|||Olá mundo
         console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
       }
 
+      // Enforce max 42 chars per line, 2 lines max — industry standard for subtitles
+      const MAX_CHARS = 42;
+      const finalSegments: typeof segments = [];
+      for (const seg of segments) {
+        const text = seg.text.trim();
+        if (text.length <= MAX_CHARS * 2) {
+          finalSegments.push(seg);
+          continue;
+        }
+        // Split into chunks of MAX_CHARS chars by word boundary
+        const words = text.split(' ');
+        const chunks: string[] = [];
+        let current = '';
+        for (const word of words) {
+          if ((current + ' ' + word).trim().length > MAX_CHARS && current) {
+            chunks.push(current.trim());
+            current = word;
+          } else {
+            current = current ? current + ' ' + word : word;
+          }
+        }
+        if (current) chunks.push(current.trim());
+        // Group into pairs (2 lines per subtitle)
+        const dur = seg.end - seg.start;
+        const timePerChunk = dur / chunks.length;
+        for (let i = 0; i < chunks.length; i += 2) {
+          const pair = chunks.slice(i, i + 2).join(' ');
+          finalSegments.push({
+            start: seg.start + i * timePerChunk,
+            end: Math.min(seg.start + (i + 2) * timePerChunk, seg.end),
+            text: pair,
+          });
+        }
+      }
+
       // Build final subtitle objects
-      const subtitles = segments
+      const subtitles = finalSegments
         .filter(s => s.text.trim().length > 0)
         .map(s => ({
           start: s.start,
