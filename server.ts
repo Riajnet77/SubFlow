@@ -98,7 +98,8 @@ function buildAss(subtitles: any[], style: any): string {
   const outlineAss = hexToAss(outlineColor, 0);
   // BackColour: when bgOpacity > 0, use actual opacity (0=opaque, 1=transparent in ASS)
   // ASS alpha is inverted: 0x00=fully opaque, 0xFF=fully transparent
-  // whitebox uses white background, darkbox/cinema/ice use black
+  // For box presets: BackColour = box background color
+  // BorderStyle=3: box color uses BackColour
   const bgColor = style.preset === 'whitebox' ? '#FFFFFF' : '#000000';
   const backColour = bgOpacity > 0
     ? hexToAss(bgColor, 1 - bgOpacity)
@@ -125,8 +126,8 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'bold' ? 3
     : 2;
 
-  // BorderStyle: 1=outline only, 4=full opaque box (more reliable than 3 in libass)
-  const borderStyle = bgOpacity > 0 ? 4 : 1;
+  // BorderStyle: 1=outline+shadow, 3=opaque box (BackColour = box bg)
+  const borderStyle = bgOpacity > 0 ? 3 : 1;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
