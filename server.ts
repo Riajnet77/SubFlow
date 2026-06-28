@@ -96,7 +96,13 @@ function buildAss(subtitles: any[], style: any): string {
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
-  const backColour = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 1);
+  // BackColour: when bgOpacity > 0, use actual opacity (0=opaque, 1=transparent in ASS)
+  // ASS alpha is inverted: 0x00=fully opaque, 0xFF=fully transparent
+  // whitebox uses white background, darkbox/cinema/ice use black
+  const bgColor = style.preset === 'whitebox' ? '#FFFFFF' : '#000000';
+  const backColour = bgOpacity > 0
+    ? hexToAss(bgColor, 1 - bgOpacity)
+    : hexToAss('#000000', 1); // fully transparent
 
   // Map presets to ASS effects — matching CSS preview as closely as possible
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels'];
@@ -118,6 +124,9 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
     : 2;
+
+  // BorderStyle: 1=outline only, 4=full opaque box (more reliable than 3 in libass)
+  const borderStyle = bgOpacity > 0 ? 4 : 1;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
@@ -143,7 +152,7 @@ WrapStyle: 1
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,1,${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
