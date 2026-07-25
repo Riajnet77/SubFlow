@@ -160,9 +160,13 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // For box presets, add inline override to ensure background renders
+  // For box presets, add inline override to ensure background renders correctly
+  // \4a controls box background alpha (0=opaque), \3c sets primary color
+  // \4c sets box background color explicitly (white or black)
+  const boxBgHex = style.preset === 'whitebox' ? 'FFFFFF' : '000000';
+  const boxAlpha = Math.round((1 - bgOpacity) * 255).toString(16).padStart(2, '0').toUpperCase();
   const boxTag = bgOpacity > 0
-    ? `{\\bord0\\shad0\\3a&H${Math.round((1-bgOpacity)*255).toString(16).padStart(2,'0').toUpperCase()}&\\4a&H${Math.round((1-bgOpacity)*255).toString(16).padStart(2,'0').toUpperCase()}&}`
+    ? `{\\bord0\\shad0\\4c&H${boxBgHex}&\\4a&H${boxAlpha}&}`
     : '';
 
   const events = subtitles
