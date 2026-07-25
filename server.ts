@@ -111,8 +111,8 @@ function buildAss(subtitles: any[], style: any): string {
   // bold preset: thick outline, no shadow
   // others: standard outline + minimal shadow
   // Shadow depth: ASS shadow is directional drop shadow
-  // For BorderStyle=4: shadowDepth = box padding, outlineWidth = ignored
-  const shadowDepth = bgOpacity > 0 ? 8
+  // For BorderStyle=3: shadow must be 0, outline must be 0 for box to render
+  const shadowDepth = bgOpacity > 0 ? 0
     : style.preset === 'shadow' ? 3
     : style.preset === 'matrix' ? 2
     : style.preset === 'neon' ? 0
@@ -125,7 +125,7 @@ function buildAss(subtitles: any[], style: any): string {
     : 2;
 
   // BorderStyle: 1=outline+shadow, 3=opaque box (BackColour = box bg)
-  const borderStyle = bgOpacity > 0 ? 4 : 1;
+  const borderStyle = bgOpacity > 0 ? 3 : 1;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
@@ -147,7 +147,7 @@ ScriptType: v4.00+
 PlayResX: ${playW}
 PlayResY: ${playH}
 ScaledBorderAndShadow: yes
-WrapStyle: 1
+WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
