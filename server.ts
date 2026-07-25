@@ -98,12 +98,9 @@ function buildAss(subtitles: any[], style: any): string {
   const outlineAss = hexToAss(outlineColor, 0);
   // BackColour: when bgOpacity > 0, use actual opacity (0=opaque, 1=transparent in ASS)
   // ASS alpha is inverted: 0x00=fully opaque, 0xFF=fully transparent
-  // For box presets: BackColour = box background color
-  // BorderStyle=3: box color uses BackColour
-  const bgColor = style.preset === 'whitebox' ? '#FFFFFF' : '#000000';
-  const backColour = bgOpacity > 0
-    ? hexToAss(bgColor, 1 - bgOpacity)
-    : hexToAss('#000000', 1); // fully transparent
+  // BackColour used for BorderStyle=4 semi-transparent box
+  // OutlineColour = box background color (solid), BackColour = shadow color (unused here)
+  const backColour = hexToAss('#000000', 1); // fully transparent — not used in BorderStyle=4
 
   // Map presets to ASS effects — matching CSS preview as closely as possible
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels'];
@@ -114,8 +111,8 @@ function buildAss(subtitles: any[], style: any): string {
   // bold preset: thick outline, no shadow
   // others: standard outline + minimal shadow
   // Shadow depth: ASS shadow is directional drop shadow
-  // BorderStyle=3 requires Outline=0 and Shadow=0 to render BackColour correctly
-  const shadowDepth = bgOpacity > 0 ? 0
+  // For BorderStyle=4: shadowDepth = box padding, outlineWidth = ignored
+  const shadowDepth = bgOpacity > 0 ? 8
     : style.preset === 'shadow' ? 3
     : style.preset === 'matrix' ? 2
     : style.preset === 'neon' ? 0
@@ -128,7 +125,7 @@ function buildAss(subtitles: any[], style: any): string {
     : 2;
 
   // BorderStyle: 1=outline+shadow, 3=opaque box (BackColour = box bg)
-  const borderStyle = bgOpacity > 0 ? 3 : 1;
+  const borderStyle = bgOpacity > 0 ? 4 : 1;
 
   // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
   // This gives us full control over vertical position without fighting ASS alignment logic
@@ -160,17 +157,8 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // For box presets, add inline override to ensure background renders correctly
-  // \4a controls box background alpha (0=opaque), \3c sets primary color
-  // \4c sets box background color explicitly (white or black)
-  const boxBgHex = style.preset === 'whitebox' ? 'FFFFFF' : '000000';
-  const boxAlpha = Math.round((1 - bgOpacity) * 255).toString(16).padStart(2, '0').toUpperCase();
-  const boxTag = bgOpacity > 0
-    ? `{\\bord0\\shad0\\4c&H${boxBgHex}&\\4a&H${boxAlpha}&}`
-    : '';
-
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${boxTag}${sub.text}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${sub.text}`)
     .join('\n');
 
   return header + events + '\n';
