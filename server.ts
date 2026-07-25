@@ -157,8 +157,13 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
+  // For whitebox: force OutlineColour override inline since BorderStyle=3 uses it for box
+  const inlineTag = (bgOpacity > 0 && style.preset === 'whitebox')
+    ? '{\\3c&H00FFFFFF&}'  // force white box color
+    : '';
+
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${sub.text}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${inlineTag}${sub.text}`)
     .join('\n');
 
   return header + events + '\n';
