@@ -114,6 +114,7 @@ function buildAss(subtitles: any[], style: any): string {
   // bold preset: thick outline, no shadow
   // others: standard outline + minimal shadow
   // Shadow depth: ASS shadow is directional drop shadow
+  // BorderStyle=3 requires Outline=0 and Shadow=0 to render BackColour correctly
   const shadowDepth = bgOpacity > 0 ? 0
     : style.preset === 'shadow' ? 3
     : style.preset === 'matrix' ? 2
@@ -159,8 +160,13 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
+  // For box presets, add inline override to ensure background renders
+  const boxTag = bgOpacity > 0
+    ? `{\\bord0\\shad0\\3a&H${Math.round((1-bgOpacity)*255).toString(16).padStart(2,'0').toUpperCase()}&\\4a&H${Math.round((1-bgOpacity)*255).toString(16).padStart(2,'0').toUpperCase()}&}`
+    : '';
+
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${sub.text}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${boxTag}${sub.text}`)
     .join('\n');
 
   return header + events + '\n';
@@ -201,6 +207,25 @@ async function startServer() {
         fs.writeFileSync(assPath, buildAss(subtitles, style));
         console.log(`[render ${id}] Starting encode...`);
 
+        // Build video filter chain
+        const bgOpacity = style.bgOpacity || 0;
+        const boxPresets = ['darkbox', 'whitebox', 'cinema', 'classic', 'ice'];
+        const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
+        
+        let vfFilter = '';
+        if (hasBox) {
+          // Draw background box using FFmpeg drawbox (more reliable than ASS BorderStyle)
+          const boxColor = style.preset === 'whitebox' ? 'white' : 'black';
+          const boxAlpha = bgOpacity > 0 ? bgOpacity : 0.75;
+          const boxX = Math.round(((style.box?.x || 5) / 100) * (style.nativeW || 720));
+          const boxY = Math.round(((style.box?.y || 78) / 100) * (style.nativeH || 1280));
+          const boxW = Math.round(((style.box?.w || 90) / 100) * (style.nativeW || 720));
+          const boxH = Math.round(((style.box?.h || 14) / 100) * (style.nativeH || 1280));
+          vfFilter = `drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
+        } else {
+          vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
+        }
+
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
             .outputOptions([
@@ -209,7 +234,7 @@ async function startServer() {
               '-crf 23',
               '-threads 1',
               '-tune fastdecode',
-              `-vf ass=${assPath}:fontsdir=${process.cwd()}`,
+              `-vf ${vfFilter}`,
               '-c:a copy',
               '-movflags +faststart',
               '-f mp4',
