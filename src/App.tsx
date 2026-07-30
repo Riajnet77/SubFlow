@@ -62,6 +62,7 @@ const PRESETS: Record<string, Partial<SubStyle>> = {
   darkbox: { fontName: "Arial",       fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.85 },
   whitebox:{ fontName: "Arial",       fontSize: 18, primaryColor: "#000000", outlineColor: "#FFFFFF", bgOpacity: 0.9 },
   reels:   { fontName: "Impact",      fontSize: 28, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
+  emphasis:{ fontName: "Arial",       fontSize: 28, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
 };
 const PRESET_LIST = [
   { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
@@ -74,6 +75,7 @@ const PRESET_LIST = [
   { key: "purple",   label: "Purple",    emoji: "🟣" }, { key: "green",   label: "Green",    emoji: "💚" },
   { key: "darkbox",  label: "Dark Box",  emoji: "⬛" }, { key: "whitebox",label: "White Box",emoji: "⬜" },
   { key: "reels",    label: "Reels",     emoji: "🎞️" },
+  { key: "emphasis", label: "Emphasis",  emoji: "✨" },
 ];
 const DEFAULT_BOX: SubBox = { x: 5, y: 78, w: 90, h: 14 };
 const DEFAULT_STYLE: SubStyle = { fontSize: 26, fontName: "Impact", primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0, preset: "impact", box: DEFAULT_BOX };
@@ -358,8 +360,8 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
               reject(new Error(error || 'Render failed'));
             }
           } catch (e) {
-            clearInterval(interval);
-            reject(e);
+            // Don't reject on network error — just retry next interval
+            console.warn('[poll] status check failed, retrying...', e);
           }
         }, 3000);
       });
