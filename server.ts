@@ -9,7 +9,48 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// Download modern ffmpeg at startup if not present
+const modernFfmpeg = path.join(process.cwd(), '_ffmpeg');
+(async () => {
+  if (!fs.existsSync(modernFfmpeg)) {
+    console.log('[ffmpeg] Downloading modern ffmpeg...');
+    try {
+      const { execSync } = require('child_process');
+      execSync(
+        `curl -sL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" | ` +
+        `tar -xJ --strip-components=1 -C ${process.cwd()} --wildcards "*/ffmpeg" && ` +
+        `mv ${path.join(process.cwd(), 'ffmpeg')} ${modernFfmpeg} && ` +
+        `chmod +x ${modernFfmpeg}`,
+        { timeout: 120000 }
+      );
+      console.log('[ffmpeg] Downloaded modern ffmpeg successfully');
+    } catch(e: any) {
+      console.error('[ffmpeg] Download failed:', e.message);
+    }
+  }
+  if (fs.existsSync(modernFfmpeg)) {
+    ffmpeg.setFfmpegPath(modernFfmpeg);
+    console.log('[ffmpeg] Using modern ffmpeg');
+  } else {
+    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+    console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
+  }
+})();
+ffmpeg.setFfmpegPath(ffmpegInstaller.path); // temporary until async completes
+
+// Create fonts directory and copy TTF files from root
+const fontsDir = path.join(process.cwd(), '_fonts');
+if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
+const TTF_FILES = ['ARIAL.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
+  'TREBUC.TTF','TREBUCBD.TTF','TAHOMA.TTF','TAHOMABD.TTF','COUR.TTF','COURBD.TTF'];
+for (const f of TTF_FILES) {
+  const src = path.join(process.cwd(), f);
+  const dst = path.join(fontsDir, f);
+  if (fs.existsSync(src) && !fs.existsSync(dst)) {
+    fs.copyFileSync(src, dst);
+    console.log(`[fonts] Copied ${f} to _fonts/`);
+  }
+}
 
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
 const upload = multer({
@@ -41,6 +82,47 @@ function buildSrt(subtitles: any[]): string {
  * Position: ASS uses absolute pixel coords. We convert the % box (x,y,w,h)
  * to pixels using the style.browserW / browserH sent from the frontend.
  */
+// ── Emphasis preset: use LLM to identify key words and bold them ──────────────
+async function applyEmphasis(subtitles: any[], groq: any): Promise<any[]> {
+  try {
+    const texts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+    const chat = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a subtitle emphasis editor. For each subtitle line, identify the 1-2 most important words (nouns, verbs, key adjectives) and wrap them in **double asterisks**.
+Keep ALL other words exactly as-is. Return the same numbered format.
+Example:
+Input:  1|||you need to find the demand
+Output: 1|||you need to find the **demand**
+Input:  2|||where people are looking for answers
+Output: 2|||where people are looking for **answers**
+Return ONLY the numbered lines, nothing else.`,
+        },
+        { role: 'user', content: texts },
+      ],
+      temperature: 0.1,
+      max_tokens: 4096,
+    });
+
+    const raw = chat.choices[0]?.message?.content ?? '';
+    const emphasisMap = new Map<number, string>();
+    for (const line of raw.split('\n')) {
+      const match = line.match(/^(\d+)\|\|\|(.+)$/);
+      if (match) emphasisMap.set(parseInt(match[1]), match[2].trim());
+    }
+
+    return subtitles.map((s, i) => ({
+      ...s,
+      text: emphasisMap.get(i + 1) ?? s.text,
+    }));
+  } catch (e) {
+    console.warn('[emphasis] Failed, keeping original:', e);
+    return subtitles;
+  }
+}
+
 function buildAss(subtitles: any[], style: any): string {
   const {
     fontName: rawFontName = 'Arial',
@@ -118,7 +200,9 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'neon' ? 0
     : 0;
 
-  const outlineWidth = bgOpacity > 0 ? 0
+  // BorderStyle=3: Outline = box padding (must be > 0 for box to render!)
+  // BorderStyle=1: Outline = outline width
+  const outlineWidth = bgOpacity > 0 ? 3  // box padding — required for BorderStyle=3
     : style.preset === 'minimal' ? 1
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
@@ -157,13 +241,27 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // For whitebox: force OutlineColour override inline since BorderStyle=3 uses it for box
-  const inlineTag = (bgOpacity > 0 && style.preset === 'whitebox')
-    ? '{\\3c&H00FFFFFF&}'  // force white box color
-    : '';
+  // Box background color override per dialogue line
+  // For whitebox: use inline \3c to force white OutlineColour (box color in BorderStyle=3)
+  // For darkbox: OutlineColour already black from style, no override needed
+  const getInlineTag = () => {
+    if (bgOpacity <= 0) return '';
+    if (style.preset === 'whitebox') {
+      // Force white box: \3c=OutlineColour override + \1c=black text
+      return '{\\1c&H00000000&\\3c&H00FFFFFF&}';
+    }
+    return ''; // darkbox/cinema/ice: OutlineColour already correct from style
+  };
+  const inlineTag = getInlineTag();
+
+  // Convert **word** markers to ASS bold+size tags for emphasis preset
+  const formatEmphasis = (text: string): string => {
+    if (!text.includes('**')) return text;
+    return text.replace(/\*\*(.+?)\*\*/g, `{\\b1\\fs${Math.round(scaledFontSize * 1.4)}}$1{\\b0\\fs${scaledFontSize}}`);
+  };
 
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${inlineTag}${sub.text}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${inlineTag}${formatEmphasis(sub.text)}`)
     .join('\n');
 
   return header + events + '\n';
@@ -201,26 +299,38 @@ async function startServer() {
     // Process in background
     (async () => {
       try {
-        fs.writeFileSync(assPath, buildAss(subtitles, style));
         console.log(`[render ${id}] Starting encode...`);
 
         // Build video filter chain
         const bgOpacity = style.bgOpacity || 0;
         const boxPresets = ['darkbox', 'whitebox', 'cinema', 'classic', 'ice'];
         const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
+        // Scale to max 720px wide — 3-4x faster encode, fine for social media
+        const scaleFilter = "scale='min(720,iw)':-2:flags=lanczos";
+
+        // When drawbox handles the box, tell ASS to NOT draw its own box
+        const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
+        // Apply emphasis processing if preset is 'emphasis'
+        const finalSubtitles = style.preset === 'emphasis'
+          ? await applyEmphasis(subtitles, groq)
+          : subtitles;
+        const assContent = buildAss(finalSubtitles, assStyle);
+        fs.writeFileSync(assPath, assContent);
         
         let vfFilter = '';
         if (hasBox) {
           // Draw background box using FFmpeg drawbox (more reliable than ASS BorderStyle)
-          const boxColor = style.preset === 'whitebox' ? 'white' : 'black';
+          // Use hex colors for FFmpeg 2018 compatibility
+          const boxColor = style.preset === 'whitebox' ? '0xFFFFFF' : '0x000000';
           const boxAlpha = bgOpacity > 0 ? bgOpacity : 0.75;
           const boxX = Math.round(((style.box?.x || 5) / 100) * (style.nativeW || 720));
           const boxY = Math.round(((style.box?.y || 78) / 100) * (style.nativeH || 1280));
           const boxW = Math.round(((style.box?.w || 90) / 100) * (style.nativeW || 720));
           const boxH = Math.round(((style.box?.h || 14) / 100) * (style.nativeH || 1280));
-          vfFilter = `drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
+          vfFilter = `${scaleFilter},drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
+          console.log(`[render] vfFilter=${vfFilter.slice(0,100)}`);
         } else {
-          vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
+          vfFilter = `${scaleFilter},ass=${assPath}:fontsdir=${process.cwd()}`;
         }
 
         await new Promise<void>((resolve, reject) => {
