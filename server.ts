@@ -310,11 +310,7 @@ async function startServer() {
 
         // When drawbox handles the box, tell ASS to NOT draw its own box
         const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
-        // Apply emphasis processing if preset is 'emphasis'
-        const finalSubtitles = style.preset === 'emphasis'
-          ? await applyEmphasis(subtitles, groq)
-          : subtitles;
-        const assContent = buildAss(finalSubtitles, assStyle);
+        const assContent = buildAss(subtitles, assStyle);
         fs.writeFileSync(assPath, assContent);
         
         let vfFilter = '';
