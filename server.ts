@@ -33,10 +33,16 @@ const modernFfmpeg = path.join(process.cwd(), '_ffmpeg');
     console.log('[ffmpeg] Using modern ffmpeg');
   } else {
     ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
+// Groq client — shared across routes
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
   }
 })();
-ffmpeg.setFfmpegPath(ffmpegInstaller.path); // temporary until async completes
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
+// Groq client — shared across routes
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY }); // temporary until async completes
 
 // Create fonts directory and copy TTF files from root
 const fontsDir = path.join(process.cwd(), '_fonts');
@@ -422,7 +428,6 @@ async function startServer() {
         return res.status(400).json({ error: 'Audio too large for transcription (max ~10 min). Please use a shorter video.' });
       }
 
-      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
       // Step 1 — transcribe with retry on premature close
       let transcription: any;
@@ -605,7 +610,7 @@ Output: 1|||Olá mundo
       }
 
       // Build final subtitle objects
-      const subtitles = finalSegments
+      let subtitles = finalSegments
         .filter(s => s.text.trim().length > 0)
         .map(s => ({
           start: s.start,
@@ -613,6 +618,42 @@ Output: 1|||Olá mundo
           text: s.text.trim(),
           confidence: 0.9,
         }));
+
+      // Apply emphasis marking if requested
+      if (req.body.emphasis === 'true' && subtitles.length > 0) {
+        console.log(`[transcribe ${id}] Applying emphasis...`);
+        try {
+          const emphTexts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+          const emphChat = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a subtitle emphasis editor. For each subtitle line, identify the 1-2 most important words (key nouns or verbs) and wrap ONLY those words in **double asterisks**. Keep all other words exactly as-is. Return the same numbered format with ||| separator. Nothing else.
+Example:
+Input:  1|||you need to find the demand
+Output: 1|||you need to find the **demand**`,
+              },
+              { role: 'user', content: emphTexts },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+          });
+          const emphRaw = emphChat.choices[0]?.message?.content ?? '';
+          const emphMap = new Map<number, string>();
+          for (const line of emphRaw.split('\n')) {
+            const match = line.match(/^(\d+)\|\|\|(.+)$/);
+            if (match) emphMap.set(parseInt(match[1]), match[2].trim());
+          }
+          subtitles = subtitles.map((s, i) => ({
+            ...s,
+            text: emphMap.get(i + 1) ?? s.text,
+          }));
+          console.log(`[transcribe ${id}] Emphasis OK`);
+        } catch (e) {
+          console.warn(`[transcribe ${id}] Emphasis failed, keeping original`);
+        }
+      }
 
       cleanup();
       res.json({ subtitles });
