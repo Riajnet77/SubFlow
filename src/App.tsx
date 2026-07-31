@@ -158,13 +158,31 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
       }}
       onPointerDown={e => pd(e, "move")} onPointerMove={pm} onPointerUp={pu}
     >
-      {text && <span style={{
-        fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
-        background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
-        padding: style.bgOpacity > 0 ? "2px 8px" : "0", borderRadius: style.bgOpacity > 0 ? "3px" : "0",
-        textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
-        whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
-      }}>{text}</span>}
+      {text && (
+        text.includes('**') ? (
+          <span style={{
+            fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
+            background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+            padding: style.bgOpacity > 0 ? "2px 8px" : "0", borderRadius: style.bgOpacity > 0 ? "3px" : "0",
+            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
+            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
+          }}>
+            {text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+              part.startsWith('**') && part.endsWith('**')
+                ? <strong key={i} style={{ fontSize: Math.round(fs * 1.4) + "px", fontWeight: 900 }}>{part.slice(2, -2)}</strong>
+                : <span key={i}>{part}</span>
+            )}
+          </span>
+        ) : (
+          <span style={{
+            fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
+            background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+            padding: style.bgOpacity > 0 ? "2px 8px" : "0", borderRadius: style.bgOpacity > 0 ? "3px" : "0",
+            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
+            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
+          }}>{text}</span>
+        )
+      )}
       {!text && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", pointerEvents: "none", userSelect: "none", fontFamily: "monospace" }}>subtitle area</span>}
       {sel && HANDLES.map(h => (
         <div key={h.k}
@@ -228,7 +246,20 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
     const changesVisual = Object.keys(p).some(k => visualKeys.includes(k));
     onChange({ ...style, ...p, preset: changesVisual ? "custom" : style.preset });
   };
-  const applyPreset = (k: string) => onChange({ ...style, ...PRESETS[k], preset: k });
+  const applyPreset = (k: string) => {
+    onChange({ ...style, ...PRESETS[k], preset: k });
+    // When selecting emphasis, apply AI word emphasis to subtitles
+    if (k === 'emphasis' && subtitles.length > 0) {
+      fetch('/api/emphasis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtitles }),
+      })
+        .then(r => r.json())
+        .then(data => { if (data.subtitles) onSubChange(data.subtitles); })
+        .catch(() => {}); // silently fail — subtitles stay as-is
+    }
+  };
   const listRef = useRef<HTMLDivElement>(null);
   const activeIdx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
   useEffect(() => {
