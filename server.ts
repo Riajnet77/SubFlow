@@ -311,8 +311,7 @@ async function startServer() {
         const bgOpacity = style.bgOpacity || 0;
         const boxPresets = ['darkbox', 'whitebox', 'cinema', 'classic', 'ice'];
         const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
-        // Scale to max 720px wide — 3-4x faster encode, fine for social media
-        const scaleFilter = "scale='min(720,iw)':-2:flags=lanczos";
+        const scaleFilter = '';
 
         // When drawbox handles the box, tell ASS to NOT draw its own box
         const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
@@ -329,10 +328,10 @@ async function startServer() {
           const boxY = Math.round(((style.box?.y || 78) / 100) * (style.nativeH || 1280));
           const boxW = Math.round(((style.box?.w || 90) / 100) * (style.nativeW || 720));
           const boxH = Math.round(((style.box?.h || 14) / 100) * (style.nativeH || 1280));
-          vfFilter = `${scaleFilter},drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
+          vfFilter = `drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
           console.log(`[render] vfFilter=${vfFilter.slice(0,100)}`);
         } else {
-          vfFilter = `${scaleFilter},ass=${assPath}:fontsdir=${process.cwd()}`;
+          vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
         }
 
         await new Promise<void>((resolve, reject) => {
