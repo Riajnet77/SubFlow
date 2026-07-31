@@ -286,6 +286,18 @@ async function startServer() {
   type JobStatus = 'processing' | 'done' | 'error';
   const jobs = new Map<string, { status: JobStatus; error?: string; outputPath?: string }>();
 
+  // ── /api/emphasis ─────────────────────────────────────────────────────────────
+  app.post('/api/emphasis', express.json(), async (req, res) => {
+    try {
+      const { subtitles } = req.body;
+      if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
+      const result = await applyEmphasis(subtitles, groq);
+      res.json({ subtitles: result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── /api/render ────────────────────────────────────────────────────────────
   app.post('/api/render', upload.single('video'), async (req, res) => {
     if (!req.file || !req.body.subtitles) {
