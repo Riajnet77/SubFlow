@@ -9,7 +9,16 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// Use modern FFmpeg binary committed to repo if available
+const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+if (fs.existsSync(modernFfmpegPath)) {
+  fs.chmodSync(modernFfmpegPath, '755');
+  ffmpeg.setFfmpegPath(modernFfmpegPath);
+  console.log('[ffmpeg] Using modern ffmpeg-linux binary');
+} else {
+  ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+  console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
+}
 
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
