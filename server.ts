@@ -9,35 +9,10 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
-// Download modern ffmpeg at startup if not present
-const modernFfmpeg = path.join(process.cwd(), '_ffmpeg');
-(async () => {
-  if (!fs.existsSync(modernFfmpeg)) {
-    console.log('[ffmpeg] Downloading modern ffmpeg...');
-    try {
-      const { execSync } = require('child_process');
-      execSync(
-        `curl -sL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" | ` +
-        `tar -xJ --strip-components=1 -C ${process.cwd()} --wildcards "*/ffmpeg" && ` +
-        `mv ${path.join(process.cwd(), 'ffmpeg')} ${modernFfmpeg} && ` +
-        `chmod +x ${modernFfmpeg}`,
-        { timeout: 120000 }
-      );
-      console.log('[ffmpeg] Downloaded modern ffmpeg successfully');
-    } catch(e: any) {
-      console.error('[ffmpeg] Download failed:', e.message);
-    }
-  }
-  if (fs.existsSync(modernFfmpeg)) {
-    ffmpeg.setFfmpegPath(modernFfmpeg);
-    console.log('[ffmpeg] Using modern ffmpeg');
-  } else {
-    ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
-  }
 })();
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
