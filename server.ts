@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
 // Use modern FFmpeg binary committed to repo if available
-const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+const modernFfmpegPath = path.join(__dirname, 'ffmpeg-linux');
 console.log('[ffmpeg] cwd:', process.cwd());
 console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
 console.log('[ffmpeg] path:', modernFfmpegPath);
