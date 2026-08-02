@@ -263,7 +263,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // Convert **word** markers to ASS bold+size tags for emphasis preset
   const formatEmphasis = (text: string): string => {
     if (!text.includes('**')) return text;
-    return text.replace(/\*\*(.+?)\*\*/g, `{\\b1\\fs${Math.round(scaledFontSize * 1.4)}}$1{\\b0\\fs${scaledFontSize}}`);
+    const normalSize = Math.round(scaledFontSize * 0.8);
+    const boldSize = Math.round(scaledFontSize * 2.4);
+    // \c resets color, \bord0 removes outline for clean look
+    return `{\\fs${normalSize}}` + text
+      .replace(/\*\*(.+?)\*\*/g, `{\\b1\\fs${boldSize}\\bord0}$1{\\b0\\fs${normalSize}\\bord2}`);
   };
 
   const events = subtitles
