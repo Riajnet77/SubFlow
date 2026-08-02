@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "node dist/server.cjs",
-    "build": "mkdir -p fonts && curl -sL 'https://github.com/matomo-org/travis-scripts/raw/master/fonts/Impact.ttf' -o fonts/Impact.ttf 2>/dev/null || true && vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --external:vite --outfile=dist/server.cjs && cp ffmpeg-linux dist/ffmpeg-linux 2>/dev/null || true",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "postinstall": "node -e \"const p=require('@ffmpeg-installer/ffmpeg').path; console.log('ffmpeg path:', p)\""
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
