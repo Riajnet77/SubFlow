@@ -11,6 +11,9 @@ import Groq from 'groq-sdk';
 
 // Use modern FFmpeg binary committed to repo if available
 const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+console.log('[ffmpeg] cwd:', process.cwd());
+console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
+console.log('[ffmpeg] path:', modernFfmpegPath);
 if (fs.existsSync(modernFfmpegPath)) {
   fs.chmodSync(modernFfmpegPath, '755');
   ffmpeg.setFfmpegPath(modernFfmpegPath);
