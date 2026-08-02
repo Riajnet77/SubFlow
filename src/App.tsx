@@ -130,7 +130,9 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
   const pu = () => { drag.current = null; };
 
   const fs = Math.max(8, Math.round(style.fontSize * fontScale));
-  const ts = style.bgOpacity === 0
+  // Emphasis preset: no text-shadow (clean look)
+  const ts = style.preset === 'emphasis' ? 'none'
+    : style.bgOpacity === 0
     ? `1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     : "none";
 
