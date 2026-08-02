@@ -62,7 +62,7 @@ const PRESETS: Record<string, Partial<SubStyle>> = {
   darkbox: { fontName: "Arial",       fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.85 },
   whitebox:{ fontName: "Arial",       fontSize: 18, primaryColor: "#000000", outlineColor: "#FFFFFF", bgOpacity: 0.9 },
   reels:   { fontName: "Impact",      fontSize: 28, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  emphasis:{ fontName: "Arial",       fontSize: 32, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
+  emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#FFFFFF", bgOpacity: 0 },
 };
 const PRESET_LIST = [
   { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
@@ -169,8 +169,8 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
           }}>
             {text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
               part.startsWith('**') && part.endsWith('**')
-                ? <strong key={i} style={{ fontSize: Math.round(fs * 1.6) + "px", fontWeight: 900, letterSpacing: '-0.02em' }}>{part.slice(2, -2)}</strong>
-                : <span key={i}>{part}</span>
+                ? <strong key={i} style={{ fontSize: Math.round(fs * 2.4) + "px", fontWeight: 900, letterSpacing: '-0.03em', fontFamily: style.fontName, lineHeight: 1 }}>{part.slice(2, -2)}</strong>
+                : <span key={i} style={{ fontWeight: 300, fontSize: Math.round(fs * 0.8) + "px" }}>{part}</span>
             )}
           </span>
         ) : (
