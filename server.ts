@@ -13,11 +13,6 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-})();
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
-
-// Groq client — shared across routes
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY }); // temporary until async completes
 
 // Create fonts directory and copy TTF files from root
 const fontsDir = path.join(process.cwd(), '_fonts');
