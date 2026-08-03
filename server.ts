@@ -142,7 +142,10 @@ function buildAss(subtitles: any[], style: any): string {
   // To match preview: scaledFontSize = fontSize * fontScale * (nativeH / browserH)
   //                                  = fontSize * (browserH/nativeH) * (nativeH/browserH)
   //                                  = fontSize
-  const scaledFontSize = Math.round(fontSize);
+  // With FFmpeg 7.x (modern): fontSize * fontScale gives pixel-perfect match with preview
+  // fontScale = browserH / nativeH — what the user actually saw on screen
+  const fontScaleVal = style.fontScale && style.fontScale > 0 ? style.fontScale : 1;
+  const scaledFontSize = Math.round(fontSize * fontScaleVal);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
