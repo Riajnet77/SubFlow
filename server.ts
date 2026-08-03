@@ -304,7 +304,8 @@ async function startServer() {
     // Process in background
     (async () => {
       try {
-        console.log(`[render ${id}] Starting encode...`);
+        const hasEmphasis = subtitles.some((s: any) => s.text && s.text.includes('**'));
+        console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
 
         // Build video filter chain
         const bgOpacity = style.bgOpacity || 0;
