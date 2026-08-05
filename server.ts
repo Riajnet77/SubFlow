@@ -250,7 +250,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if (!text.includes('**')) return text;
     const boldSize = Math.round(scaledFontSize * 1.6);
     // Use only bold tag, no size change — avoids libass wrapping issues
-    return text.replace(/\*\*(.+?)\*\*/g, `{\\b1}$1{\\b0}`);
+    return text.replace(/\*\*(.+?)\*\*/g, (_, word) => '{\b1}' + word + '{\b0}');
   };
 
   const events = subtitles
@@ -306,6 +306,11 @@ async function startServer() {
       try {
         const hasEmphasis = subtitles.some((s: any) => s.text && s.text.includes('**'));
         console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
+        // Log first subtitle to verify emphasis tags
+        if (hasEmphasis) {
+          const firstEmphasis = subtitles.find((s: any) => s.text && s.text.includes('**'));
+          console.log(`[render ${id}] Sample subtitle:`, firstEmphasis?.text?.slice(0, 100));
+        }
 
         // Build video filter chain
         const bgOpacity = style.bgOpacity || 0;
