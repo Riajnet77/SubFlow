@@ -355,6 +355,7 @@ async function startServer() {
               '-movflags +faststart',
               '-f mp4',
             ])
+            .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd.slice(0, 200)))
             .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
             .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
             .on('error', reject)
