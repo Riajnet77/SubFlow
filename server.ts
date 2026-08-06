@@ -29,7 +29,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 // Create fonts directory and copy TTF files from root
 const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
-const TTF_FILES = ['ARIAL.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
+const TTF_FILES = ['ARIAL.TTF','ARIALBD.TTF','ARIALI.TTF','ARIALBI.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
   'TREBUC.TTF','TREBUCBD.TTF','TAHOMA.TTF','TAHOMABD.TTF','COUR.TTF','COURBD.TTF'];
 for (const f of TTF_FILES) {
   const src = path.join(process.cwd(), f);
@@ -355,7 +355,7 @@ async function startServer() {
               '-movflags +faststart',
               '-f mp4',
             ])
-            .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd.slice(0, 200)))
+            .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd))
             .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
             .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
             .on('error', reject)
