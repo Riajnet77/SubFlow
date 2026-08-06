@@ -248,9 +248,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // Convert **word** markers to ASS bold+size tags for emphasis preset
   const formatEmphasis = (text: string): string => {
     if (!text.includes('**')) return text;
-    const boldSize = Math.round(scaledFontSize * 1.6);
-    // Use only bold tag, no size change — avoids libass wrapping issues
-    return text.replace(/\*\*(.+?)\*\*/g, (_, word) => '{\b1}' + word + '{\b0}');
+    // Use \x5cb1 = literal backslash + b1 for ASS bold tag
+    const BOLD_OPEN = String.fromCharCode(123) + String.fromCharCode(92) + 'b1' + String.fromCharCode(125);
+    const BOLD_CLOSE = String.fromCharCode(123) + String.fromCharCode(92) + 'b0' + String.fromCharCode(125);
+    const result = text.replace(/\*\*(.+?)\*\*/g, (_, word) => BOLD_OPEN + word + BOLD_CLOSE);
+    console.log('[emphasis] sample:', result.slice(0, 80));
+    return result;
   };
 
   const events = subtitles
