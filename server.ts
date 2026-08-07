@@ -26,18 +26,23 @@ if (fs.existsSync(modernFfmpegPath)) {
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Create fonts directory and copy TTF files from root
+
+// Copy fonts to ~/.fonts where fontconfig finds them (required for static ffmpeg)
 const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
+const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
+if (!fs.existsSync(homeFontsDir)) fs.mkdirSync(homeFontsDir, { recursive: true });
 const TTF_FILES = ['ARIAL.TTF','ARIALBD.TTF','ARIALI.TTF','ARIALBI.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
   'TREBUC.TTF','TREBUCBD.TTF','TAHOMA.TTF','TAHOMABD.TTF','COUR.TTF','COURBD.TTF'];
 for (const f of TTF_FILES) {
   const src = path.join(process.cwd(), f);
-  const dst = path.join(fontsDir, f);
-  if (fs.existsSync(src) && !fs.existsSync(dst)) {
-    fs.copyFileSync(src, dst);
-    console.log(`[fonts] Copied ${f} to _fonts/`);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(fontsDir, f));
+    fs.copyFileSync(src, path.join(homeFontsDir, f));
   }
+}
+try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
+console.log('[fonts] Ready in', homeFontsDir);
 }
 
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
