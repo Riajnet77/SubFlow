@@ -358,6 +358,7 @@ async function startServer() {
             .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd))
             .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
             .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
+            .on('stderr', line => { if (line.includes('font') || line.includes('bold') || line.includes('warn')) console.log(`[render stderr]`, line); })
             .on('error', reject)
             .save(outputPath);
         });
