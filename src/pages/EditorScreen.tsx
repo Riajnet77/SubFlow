@@ -86,7 +86,11 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
     >
       <span style={{
         fontFamily: style.fontName, fontSize: fs + 'px', color: style.primaryColor, textShadow,
-        background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : 'transparent',
+        // Box color must match what the export actually draws (server.ts picks
+        // white for the 'whitebox' preset, black for everything else with a box).
+        background: style.bgOpacity > 0
+          ? (style.preset === 'whitebox' ? `rgba(255,255,255,${style.bgOpacity})` : `rgba(0,0,0,${style.bgOpacity})`)
+          : 'transparent',
         padding: style.bgOpacity > 0 ? '2px 8px' : '0', borderRadius: style.bgOpacity > 0 ? '3px' : '0',
         textAlign: 'center', lineHeight: 1.2, maxWidth: '98%', wordBreak: 'break-word',
         whiteSpace: 'normal', display: 'block', pointerEvents: 'none', userSelect: 'none',
