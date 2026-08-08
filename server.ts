@@ -43,7 +43,6 @@ for (const f of TTF_FILES) {
 }
 try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
 console.log('[fonts] Ready in', homeFontsDir);
-}
 
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
 const upload = multer({
