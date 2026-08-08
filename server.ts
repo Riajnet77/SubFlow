@@ -419,6 +419,10 @@ async function startServer() {
 
       console.log(`[transcribe ${id}] Extracting audio...`);
 
+      // Set fontconfig to find our fonts
+      process.env.FONTCONFIG_PATH = process.cwd();
+      process.env.FC_FONT_PATH = process.cwd();
+
       await new Promise<void>((resolve, reject) => {
         ffmpeg(inputPath)
           .noVideo()
