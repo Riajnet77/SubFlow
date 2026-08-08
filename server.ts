@@ -6,8 +6,13 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
+
+// __dirname doesn't exist in ES modules — derive it from import.meta.url instead
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Use modern FFmpeg binary committed to repo if available
 const modernFfmpegPath = path.join(__dirname, 'ffmpeg-linux');
