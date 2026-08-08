@@ -237,15 +237,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
   // Box background color override per dialogue line
-  // For whitebox: use inline \3c to force white OutlineColour (box color in BorderStyle=3)
-  // For darkbox: OutlineColour already black from style, no override needed
+  // For whitebox: force black text so it stays readable against the white box drawn
+  // by ffmpeg's drawbox filter. This must NOT depend on bgOpacity — the render handler
+  // always zeroes bgOpacity for box presets (so ASS doesn't draw its own box on top of
+  // drawbox's), but the text still needs to contrast the box regardless of that flag.
+  // For darkbox/cinema/ice: OutlineColour already correct from style, no override needed.
   const getInlineTag = () => {
-    if (bgOpacity <= 0) return '';
     if (style.preset === 'whitebox') {
-      // Force white box: \3c=OutlineColour override + \1c=black text
+      // Force white box color + black text: \3c=OutlineColour override + \1c=text color override
       return '{\\1c&H00000000&\\3c&H00FFFFFF&}';
     }
-    return ''; // darkbox/cinema/ice: OutlineColour already correct from style
+    return '';
   };
   const inlineTag = getInlineTag();
 
@@ -325,7 +327,10 @@ async function startServer() {
         const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
         const scaleFilter = '';
 
-        // When drawbox handles the box, tell ASS to NOT draw its own box
+        // When drawbox handles the box, tell ASS to NOT draw its own box.
+        // NOTE: this only suppresses the ASS-native box (BorderStyle=3) — it must NOT
+        // suppress per-preset text-color overrides (like whitebox's black-text tag),
+        // which is why buildAss's getInlineTag() no longer keys off bgOpacity.
         const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
         const assContent = buildAss(subtitles, assStyle);
         fs.writeFileSync(assPath, assContent);
