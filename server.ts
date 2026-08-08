@@ -6,16 +6,15 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
-// __dirname doesn't exist in ES modules — derive it from import.meta.url instead
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Use modern FFmpeg binary committed to repo if available
-const modernFfmpegPath = path.join(__dirname, 'ffmpeg-linux');
+// Use modern FFmpeg binary committed to repo if available.
+// NOTE: intentionally process.cwd(), not __dirname/import.meta.url — those break
+// once the Render build bundles this to CJS (import.meta.url is undefined there).
+// process.cwd() is already used the same way below for the fonts dir, and matches
+// __dirname's value in practice since server.ts always runs from the repo root.
+const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
 console.log('[ffmpeg] cwd:', process.cwd());
 console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
 console.log('[ffmpeg] path:', modernFfmpegPath);
