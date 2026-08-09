@@ -177,6 +177,12 @@ function buildAss(subtitles: any[], style: any): string {
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
+  // SecondaryColour is only visually meaningful when a line uses \k karaoke tags
+  // (Viral preset, when word-level timestamps are available): text renders in
+  // SecondaryColour until its \k time elapses, then flips to PrimaryColour — that flip
+  // is the actual word-by-word highlight effect. White reads as a sensible "not yet
+  // spoken" base color under the gold "active" PrimaryColour Viral already uses.
+  const secondaryAss = hexToAss('#FFFFFF', 0);
   // BackColour doubles as the box's drop-shadow color under BorderStyle=3 — a soft
   // semi-transparent black gives the box some visual depth instead of looking flat/pasted-on.
   const backColour = hexToAss('#000000', 0.5);
@@ -236,7 +242,7 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -272,8 +278,42 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // applied in the frontend preview for this preset).
   const applyTextCase = (t: string): string => style.preset === 'viral' ? t.toUpperCase() : t;
 
+  // Real Hormozi-style word bursts (ASS \k karaoke) for the Viral preset, when the
+  // subtitle carries per-word timestamps (set in /api/transcribe — only present for
+  // non-translated transcripts, since translated words don't line up with the
+  // original timing). Only 1-2 words are shown on screen at a time — the whole
+  // sentence is NOT kept visible with colors just flipping inside it; each small
+  // word-group gets its own Dialogue line timed to exactly those words, so captions
+  // burst in rapid succession like CapCut/Opus-style captions, not a static sentence.
+  const VIRAL_MAX_WORDS = 2;
+  const buildKaraokeLines = (sub: any): string[] | null => {
+    if (!sub.words || sub.words.length === 0) return null;
+    const lines: string[] = [];
+    for (let i = 0; i < sub.words.length; i += VIRAL_MAX_WORDS) {
+      const chunk = sub.words.slice(i, i + VIRAL_MAX_WORDS);
+      const nextChunkStart = sub.words[i + VIRAL_MAX_WORDS]?.start;
+      const chunkStart = chunk[0].start;
+      const chunkEnd = nextChunkStart ?? chunk[chunk.length - 1].end;
+      let prevEnd = chunkStart;
+      let text = '';
+      for (const w of chunk) {
+        const durCs = Math.max(1, Math.round((w.end - prevEnd) * 100));
+        const word = String(w.word).trim().toUpperCase();
+        text += `{\\k${durCs}}${word} `;
+        prevEnd = w.end;
+      }
+      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,0,0,0,,${text.trim()}`);
+    }
+    return lines;
+  };
+
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${formatEmphasis(applyTextCase(sub.text))}`)
+    .flatMap(sub => {
+      const karaokeLines = style.preset === 'viral' ? buildKaraokeLines(sub) : null;
+      if (karaokeLines) return karaokeLines;
+      const text = formatEmphasis(applyTextCase(sub.text));
+      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${text}`];
+    })
     .join('\n');
 
   return header + events + '\n';
@@ -448,7 +488,7 @@ async function startServer() {
             file: fs.createReadStream(audioPath),
             model: 'whisper-large-v3-turbo',
             response_format: 'verbose_json',
-            timestamp_granularities: ['segment'],
+            timestamp_granularities: ['segment', 'word'],
           });
           break;
         } catch (e: any) {
@@ -628,7 +668,17 @@ Output: 1|||Olá mundo
           end: s.end,
           text: s.text.trim(),
           confidence: 0.9,
-        }));
+        })) as Array<{ start: number; end: number; text: string; confidence: number; words?: Array<{ word: string; start: number; end: number }> }>;
+
+      // Attach per-word timestamps for real word-by-word highlighting (ASS \k karaoke,
+      // used by the Viral preset). Only when the subtitle text is still the original
+      // transcription — once translated, the words no longer correspond to these
+      // timings (different language, different word count/order).
+      if (targetLang === 'original' && words.length > 0) {
+        for (const sub of subtitles) {
+          sub.words = words.filter(w => w.start >= sub.start - 0.05 && w.end <= sub.end + 0.15);
+        }
+      }
 
       // Apply emphasis marking if requested
       if (req.body.emphasis === 'true' && subtitles.length > 0) {
