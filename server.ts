@@ -274,24 +274,40 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return result;
   };
 
-  // 'viral' preset renders in all-caps (matches the CSS text-transform:uppercase
-  // applied in the frontend preview for this preset).
-  const applyTextCase = (t: string): string => style.preset === 'viral' ? t.toUpperCase() : t;
-
-  // Real Hormozi-style word bursts (ASS \k karaoke) for the Viral preset, when the
-  // subtitle carries per-word timestamps (set in /api/transcribe — only present for
-  // non-translated transcripts, since translated words don't line up with the
-  // original timing). Only 1-2 words are shown on screen at a time — the whole
-  // sentence is NOT kept visible with colors just flipping inside it; each small
-  // word-group gets its own Dialogue line timed to exactly those words, so captions
-  // burst in rapid succession like CapCut/Opus-style captions, not a static sentence.
+  // Real Hormozi-style word bursts (ASS \k karaoke) for the Viral preset. Only 1-2
+  // words are shown on screen at a time — the whole sentence is NOT kept visible with
+  // colors just flipping inside it; each small word-group gets its own Dialogue line
+  // timed to exactly those words, so captions burst in rapid succession like
+  // CapCut/Opus-style captions, not a static sentence.
   const VIRAL_MAX_WORDS = 2;
-  const buildKaraokeLines = (sub: any): string[] | null => {
-    if (!sub.words || sub.words.length === 0) return null;
+
+  // When real per-word timestamps aren't available (translated subtitles — the
+  // translated words don't correspond 1:1 to the original Whisper timing), approximate
+  // by splitting the subtitle's own start→end duration across its words, weighted by
+  // word length (a longer word gets proportionally more screen time than "a" or "e").
+  // Not phoneme-accurate, but gives the same word-burst effect in any language —
+  // Viral no longer only works when translation is off.
+  const approximateWords = (sub: any): Array<{ word: string; start: number; end: number }> => {
+    const wordList = String(sub.text).replace(/\*\*/g, '').trim().split(/\s+/).filter(Boolean);
+    if (wordList.length === 0) return [];
+    const totalChars = wordList.reduce((a: number, w: string) => a + w.length, 0) || 1;
+    const duration = sub.end - sub.start;
+    let t = sub.start;
+    return wordList.map((w: string) => {
+      const dur = duration * (w.length / totalChars);
+      const entry = { word: w, start: t, end: t + dur };
+      t += dur;
+      return entry;
+    });
+  };
+
+  const buildKaraokeLines = (sub: any): string[] => {
+    const wordsData = (sub.words && sub.words.length > 0) ? sub.words : approximateWords(sub);
+    if (wordsData.length === 0) return [];
     const lines: string[] = [];
-    for (let i = 0; i < sub.words.length; i += VIRAL_MAX_WORDS) {
-      const chunk = sub.words.slice(i, i + VIRAL_MAX_WORDS);
-      const nextChunkStart = sub.words[i + VIRAL_MAX_WORDS]?.start;
+    for (let i = 0; i < wordsData.length; i += VIRAL_MAX_WORDS) {
+      const chunk = wordsData.slice(i, i + VIRAL_MAX_WORDS);
+      const nextChunkStart = wordsData[i + VIRAL_MAX_WORDS]?.start;
       const chunkStart = chunk[0].start;
       const chunkEnd = nextChunkStart ?? chunk[chunk.length - 1].end;
       let prevEnd = chunkStart;
@@ -309,9 +325,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const events = subtitles
     .flatMap(sub => {
-      const karaokeLines = style.preset === 'viral' ? buildKaraokeLines(sub) : null;
-      if (karaokeLines) return karaokeLines;
-      const text = formatEmphasis(applyTextCase(sub.text));
+      if (style.preset === 'viral') return buildKaraokeLines(sub);
+      const text = formatEmphasis(sub.text);
       return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${text}`];
     })
     .join('\n');
