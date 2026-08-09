@@ -184,7 +184,7 @@ function buildAss(subtitles: any[], style: any): string {
   const backColour = hexToAss('#000000', 1); // fully transparent — not used in BorderStyle=4
 
   // Map presets to ASS effects — matching CSS preview as closely as possible
-  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels'];
+  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox'];
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
   // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
