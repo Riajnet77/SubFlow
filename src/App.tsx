@@ -179,6 +179,10 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
             fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
             background: boxBg,
             padding: style.bgOpacity > 0 ? "6px 16px" : "0", borderRadius: style.bgOpacity > 0 ? "8px" : "0",
+            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
+            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
+          }}>
+            {text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
               part.startsWith('**') && part.endsWith('**')
                 ? <strong key={i} style={{ fontSize: Math.round(fs * 2.4) + "px", fontWeight: 900, letterSpacing: '-0.03em', fontFamily: style.fontName, lineHeight: 1 }}>{part.slice(2, -2)}</strong>
                 : <span key={i} style={{ fontWeight: 300, fontSize: Math.round(fs * 0.8) + "px" }}>{part}</span>
@@ -189,6 +193,9 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
             fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
             background: boxBg,
             padding: style.bgOpacity > 0 ? "6px 16px" : "0", borderRadius: style.bgOpacity > 0 ? "8px" : "0",
+            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
+            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
+          }}>{text}</span>
         )
       )}
       {!text && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", pointerEvents: "none", userSelect: "none", fontFamily: "monospace" }}>subtitle area</span>}
