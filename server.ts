@@ -177,11 +177,9 @@ function buildAss(subtitles: any[], style: any): string {
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
-  // BackColour: when bgOpacity > 0, use actual opacity (0=opaque, 1=transparent in ASS)
-  // ASS alpha is inverted: 0x00=fully opaque, 0xFF=fully transparent
-  // BackColour used for BorderStyle=4 semi-transparent box
-  // OutlineColour = box background color (solid), BackColour = shadow color (unused here)
-  const backColour = hexToAss('#000000', 1); // fully transparent — not used in BorderStyle=4
+  // BackColour doubles as the box's drop-shadow color under BorderStyle=3 — a soft
+  // semi-transparent black gives the box some visual depth instead of looking flat/pasted-on.
+  const backColour = hexToAss('#000000', 0.5);
 
   // Map presets to ASS effects — matching CSS preview as closely as possible
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox'];
@@ -190,18 +188,18 @@ function buildAss(subtitles: any[], style: any): string {
   // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
   // neon preset: thick colored outline, no shadow
   // bold preset: thick outline, no shadow
+  // box presets (bgOpacity > 0): soft drop shadow behind the box for depth
   // others: standard outline + minimal shadow
-  // Shadow depth: ASS shadow is directional drop shadow
-  // For BorderStyle=3: shadow must be 0, outline must be 0 for box to render
-  const shadowDepth = bgOpacity > 0 ? 0
+  const shadowDepth = bgOpacity > 0 ? 3
     : style.preset === 'shadow' ? 3
     : style.preset === 'matrix' ? 2
     : style.preset === 'neon' ? 0
     : 0;
 
-  // BorderStyle=3: Outline = box padding (must be > 0 for box to render!)
-  // BorderStyle=1: Outline = outline width
-  const outlineWidth = bgOpacity > 0 ? 3  // box padding — required for BorderStyle=3
+  // BorderStyle=3: Outline = box padding around the text (auto-fits per line — this
+  // is what replaced the old fixed-size drawbox rectangle)
+  // BorderStyle=1: Outline = outline/stroke width
+  const outlineWidth = bgOpacity > 0 ? 10  // generous box padding, pill-like breathing room
     : style.preset === 'minimal' ? 1
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
@@ -240,20 +238,9 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${primaryAss},${outli
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // Box background color override per dialogue line
-  // For whitebox: force black text so it stays readable against the white box drawn
-  // by ffmpeg's drawbox filter. This must NOT depend on bgOpacity — the render handler
-  // always zeroes bgOpacity for box presets (so ASS doesn't draw its own box on top of
-  // drawbox's), but the text still needs to contrast the box regardless of that flag.
-  // For darkbox/cinema/ice: OutlineColour already correct from style, no override needed.
-  const getInlineTag = () => {
-    if (style.preset === 'whitebox') {
-      // Force white box color + black text: \3c=OutlineColour override + \1c=text color override
-      return '{\\1c&H00000000&\\3c&H00FFFFFF&}';
-    }
-    return '';
-  };
-  const inlineTag = getInlineTag();
+  // Box color/contrast now comes straight from style.primaryColor / style.outlineColor
+  // (OutlineColour doubles as the box background under BorderStyle=3) — no per-preset
+  // color-forcing hack needed anymore.
 
   // Convert **word** markers to ASS bold+size tags for emphasis preset
   const formatEmphasis = (text: string): string => {
@@ -267,7 +254,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   };
 
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${inlineTag}${formatEmphasis(sub.text)}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${formatEmphasis(sub.text)}`)
     .join('\n');
 
   return header + events + '\n';
@@ -325,35 +312,14 @@ async function startServer() {
           console.log(`[render ${id}] Sample subtitle:`, firstEmphasis?.text?.slice(0, 100));
         }
 
-        // Build video filter chain
-        const bgOpacity = style.bgOpacity || 0;
-        const boxPresets = ['darkbox', 'whitebox', 'cinema', 'classic', 'ice'];
-        const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
-        const scaleFilter = '';
-
-        // When drawbox handles the box, tell ASS to NOT draw its own box.
-        // NOTE: this only suppresses the ASS-native box (BorderStyle=3) — it must NOT
-        // suppress per-preset text-color overrides (like whitebox's black-text tag),
-        // which is why buildAss's getInlineTag() no longer keys off bgOpacity.
-        const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
-        const assContent = buildAss(subtitles, assStyle);
+        // Box rendering (whitebox/darkbox/cinema/classic/ice, or any custom bgOpacity>0)
+        // now goes entirely through buildAss's native ASS box (BorderStyle=3), which
+        // auto-fits its width to each line's actual text — replacing the old fixed-size
+        // ffmpeg drawbox rectangle that always drew the same oversized box regardless
+        // of how much text was in it.
+        const assContent = buildAss(subtitles, style);
         fs.writeFileSync(assPath, assContent);
-        
-        let vfFilter = '';
-        if (hasBox) {
-          // Draw background box using FFmpeg drawbox (more reliable than ASS BorderStyle)
-          // Use hex colors for FFmpeg 2018 compatibility
-          const boxColor = style.preset === 'whitebox' ? '0xFFFFFF' : '0x000000';
-          const boxAlpha = bgOpacity > 0 ? bgOpacity : 0.75;
-          const boxX = Math.round(((style.box?.x || 5) / 100) * (style.nativeW || 720));
-          const boxY = Math.round(((style.box?.y || 78) / 100) * (style.nativeH || 1280));
-          const boxW = Math.round(((style.box?.w || 90) / 100) * (style.nativeW || 720));
-          const boxH = Math.round(((style.box?.h || 14) / 100) * (style.nativeH || 1280));
-          vfFilter = `drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill,ass=${assPath}:fontsdir=${process.cwd()}`;
-          console.log(`[render] vfFilter=${vfFilter.slice(0,100)}`);
-        } else {
-          vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
-        }
+        const vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
 
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
