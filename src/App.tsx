@@ -69,6 +69,11 @@ const PRESETS: Record<string, Partial<SubStyle>> = {
   // white outline and no shadow (see SubtitleBox) meant emphasis text vanished on any
   // light part of the video. Outline is now black so the text always has contrast.
   emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
+  // Static approximations of modern caption styles — no per-word sync animation
+  // (that needs word-level timing data we don't collect yet — see chat).
+  viral:   { fontName: "Impact",       fontSize: 32, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
+  clean:   { fontName: "Trebuchet MS", fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#333333", bgOpacity: 0 },
+  podcast: { fontName: "Verdana",      fontSize: 24, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.75 },
 };
 const PRESET_LIST = [
   { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
@@ -82,6 +87,9 @@ const PRESET_LIST = [
   { key: "darkbox",  label: "Dark Box",  emoji: "⬛" }, { key: "whitebox",label: "White Box",emoji: "⬜" },
   { key: "reels",    label: "Reels",     emoji: "🎞️" },
   { key: "emphasis", label: "Emphasis",  emoji: "✨" },
+  { key: "viral",    label: "Viral",     emoji: "🚀" },
+  { key: "clean",    label: "Clean",     emoji: "🤍" },
+  { key: "podcast",  label: "Podcast",   emoji: "🎙️" },
 ];
 const DEFAULT_BOX: SubBox = { x: 5, y: 78, w: 90, h: 14 };
 const DEFAULT_STYLE: SubStyle = { fontSize: 26, fontName: "Impact", primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0, preset: "impact", box: DEFAULT_BOX };
@@ -195,6 +203,7 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
             padding: style.bgOpacity > 0 ? "6px 16px" : "0", borderRadius: style.bgOpacity > 0 ? "8px" : "0",
             textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
             whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
+            textTransform: style.preset === 'viral' ? 'uppercase' : 'none',
           }}>{text}</span>
         )
       )}
