@@ -242,14 +242,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // (OutlineColour doubles as the box background under BorderStyle=3) — no per-preset
   // color-forcing hack needed anymore.
 
-  // Convert **word** markers to ASS bold+size tags for emphasis preset
+  // Convert **word** markers to ASS bold+size override tags for the emphasis preset.
+  // Mirrors the frontend preview exactly (SubtitleBox: emphasized word at 2.4x + bold,
+  // surrounding words shrunk to 0.8x) — previously this only bolded the word with no
+  // size change, so exported video barely resembled the dramatic preview effect.
+  const emphasisBigSize = Math.round(scaledFontSize * 2.4);
+  const emphasisSmallSize = Math.max(6, Math.round(scaledFontSize * 0.8));
   const formatEmphasis = (text: string): string => {
     if (!text.includes('**')) return text;
-    // Use \x5cb1 = literal backslash + b1 for ASS bold tag
-    const BOLD_OPEN = String.fromCharCode(123) + String.fromCharCode(92) + 'b1' + String.fromCharCode(125);
-    const BOLD_CLOSE = String.fromCharCode(123) + String.fromCharCode(92) + 'b0' + String.fromCharCode(125);
-    const result = text.replace(/\*\*(.+?)\*\*/g, (_, word) => BOLD_OPEN + word + BOLD_CLOSE);
-    console.log('[emphasis] sample:', result.slice(0, 80));
+    const result = text
+      .split(/(\*\*[^*]+\*\*)/)
+      .map(part => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const word = part.slice(2, -2);
+          return `{\\b1\\fs${emphasisBigSize}}${word}{\\b0\\fs${scaledFontSize}}`;
+        }
+        return part ? `{\\fs${emphasisSmallSize}}${part}` : part;
+      })
+      .join('');
+    console.log('[emphasis] sample:', result.slice(0, 100));
     return result;
   };
 
