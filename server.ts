@@ -9,8 +9,12 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
-// Use modern FFmpeg binary committed to repo if available
-const modernFfmpegPath = path.join(__dirname, 'ffmpeg-linux');
+// Use modern FFmpeg binary committed to repo if available.
+// NOTE: intentionally process.cwd(), not __dirname/import.meta.url — those break
+// once the Render build bundles this to CJS (import.meta.url is undefined there).
+// process.cwd() is already used the same way below for the fonts dir, and matches
+// __dirname's value in practice since server.ts always runs from the repo root.
+const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
 console.log('[ffmpeg] cwd:', process.cwd());
 console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
 console.log('[ffmpeg] path:', modernFfmpegPath);
@@ -26,19 +30,23 @@ if (fs.existsSync(modernFfmpegPath)) {
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Create fonts directory and copy TTF files from root
+
+// Copy fonts to ~/.fonts where fontconfig finds them (required for static ffmpeg)
 const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
-const TTF_FILES = ['ARIAL.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
+const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
+if (!fs.existsSync(homeFontsDir)) fs.mkdirSync(homeFontsDir, { recursive: true });
+const TTF_FILES = ['ARIAL.TTF','ARIALBD.TTF','ARIALI.TTF','ARIALBI.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
   'TREBUC.TTF','TREBUCBD.TTF','TAHOMA.TTF','TAHOMABD.TTF','COUR.TTF','COURBD.TTF'];
 for (const f of TTF_FILES) {
   const src = path.join(process.cwd(), f);
-  const dst = path.join(fontsDir, f);
-  if (fs.existsSync(src) && !fs.existsSync(dst)) {
-    fs.copyFileSync(src, dst);
-    console.log(`[fonts] Copied ${f} to _fonts/`);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(fontsDir, f));
+    fs.copyFileSync(src, path.join(homeFontsDir, f));
   }
 }
+try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
+console.log('[fonts] Ready in', homeFontsDir);
 
 // Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
 const upload = multer({
@@ -142,7 +150,10 @@ function buildAss(subtitles: any[], style: any): string {
   // To match preview: scaledFontSize = fontSize * fontScale * (nativeH / browserH)
   //                                  = fontSize * (browserH/nativeH) * (nativeH/browserH)
   //                                  = fontSize
-  const scaledFontSize = Math.round(fontSize);
+  // With FFmpeg 7.x (modern): fontSize * fontScale gives pixel-perfect match with preview
+  // fontScale = browserH / nativeH — what the user actually saw on screen
+  const fontScaleVal = style.fontScale && style.fontScale > 0 ? style.fontScale : 1;
+  const scaledFontSize = Math.round(fontSize * fontScaleVal);
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
@@ -230,24 +241,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
   // Box background color override per dialogue line
-  // For whitebox: use inline \3c to force white OutlineColour (box color in BorderStyle=3)
-  // For darkbox: OutlineColour already black from style, no override needed
+  // For whitebox: force black text so it stays readable against the white box drawn
+  // by ffmpeg's drawbox filter. This must NOT depend on bgOpacity — the render handler
+  // always zeroes bgOpacity for box presets (so ASS doesn't draw its own box on top of
+  // drawbox's), but the text still needs to contrast the box regardless of that flag.
+  // For darkbox/cinema/ice: OutlineColour already correct from style, no override needed.
   const getInlineTag = () => {
-    if (bgOpacity <= 0) return '';
     if (style.preset === 'whitebox') {
-      // Force white box: \3c=OutlineColour override + \1c=black text
+      // Force white box color + black text: \3c=OutlineColour override + \1c=text color override
       return '{\\1c&H00000000&\\3c&H00FFFFFF&}';
     }
-    return ''; // darkbox/cinema/ice: OutlineColour already correct from style
+    return '';
   };
   const inlineTag = getInlineTag();
 
   // Convert **word** markers to ASS bold+size tags for emphasis preset
   const formatEmphasis = (text: string): string => {
     if (!text.includes('**')) return text;
-    const boldSize = Math.round(scaledFontSize * 1.6);
-    // Use only bold tag, no size change — avoids libass wrapping issues
-    return text.replace(/\*\*(.+?)\*\*/g, `{\\b1}$1{\\b0}`);
+    // Use \x5cb1 = literal backslash + b1 for ASS bold tag
+    const BOLD_OPEN = String.fromCharCode(123) + String.fromCharCode(92) + 'b1' + String.fromCharCode(125);
+    const BOLD_CLOSE = String.fromCharCode(123) + String.fromCharCode(92) + 'b0' + String.fromCharCode(125);
+    const result = text.replace(/\*\*(.+?)\*\*/g, (_, word) => BOLD_OPEN + word + BOLD_CLOSE);
+    console.log('[emphasis] sample:', result.slice(0, 80));
+    return result;
   };
 
   const events = subtitles
@@ -301,7 +317,13 @@ async function startServer() {
     // Process in background
     (async () => {
       try {
-        console.log(`[render ${id}] Starting encode...`);
+        const hasEmphasis = subtitles.some((s: any) => s.text && s.text.includes('**'));
+        console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
+        // Log first subtitle to verify emphasis tags
+        if (hasEmphasis) {
+          const firstEmphasis = subtitles.find((s: any) => s.text && s.text.includes('**'));
+          console.log(`[render ${id}] Sample subtitle:`, firstEmphasis?.text?.slice(0, 100));
+        }
 
         // Build video filter chain
         const bgOpacity = style.bgOpacity || 0;
@@ -309,7 +331,10 @@ async function startServer() {
         const hasBox = bgOpacity > 0 || boxPresets.includes(style.preset || '');
         const scaleFilter = '';
 
-        // When drawbox handles the box, tell ASS to NOT draw its own box
+        // When drawbox handles the box, tell ASS to NOT draw its own box.
+        // NOTE: this only suppresses the ASS-native box (BorderStyle=3) — it must NOT
+        // suppress per-preset text-color overrides (like whitebox's black-text tag),
+        // which is why buildAss's getInlineTag() no longer keys off bgOpacity.
         const assStyle = hasBox ? { ...style, bgOpacity: 0 } : style;
         const assContent = buildAss(subtitles, assStyle);
         fs.writeFileSync(assPath, assContent);
@@ -343,8 +368,10 @@ async function startServer() {
               '-movflags +faststart',
               '-f mp4',
             ])
+            .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd))
             .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
             .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
+            .on('stderr', line => { if (line.includes('font') || line.includes('bold') || line.includes('warn')) console.log(`[render stderr]`, line); })
             .on('error', reject)
             .save(outputPath);
         });
@@ -400,6 +427,10 @@ async function startServer() {
       tmpFiles.push(inputPath, audioPath);
 
       console.log(`[transcribe ${id}] Extracting audio...`);
+
+      // Set fontconfig to _fonts directory (only TTF files, no noise)
+      process.env.FONTCONFIG_PATH = path.join(process.cwd(), '_fonts');
+      process.env.FC_FONT_PATH = path.join(process.cwd(), '_fonts');
 
       await new Promise<void>((resolve, reject) => {
         ffmpeg(inputPath)
