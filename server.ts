@@ -182,7 +182,7 @@ function buildAss(subtitles: any[], style: any): string {
   const backColour = hexToAss('#000000', 0.5);
 
   // Map presets to ASS effects — matching CSS preview as closely as possible
-  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox'];
+  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox','viral','podcast'];
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
   // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
@@ -264,8 +264,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return result;
   };
 
+  // 'viral' preset renders in all-caps (matches the CSS text-transform:uppercase
+  // applied in the frontend preview for this preset).
+  const applyTextCase = (t: string): string => style.preset === 'viral' ? t.toUpperCase() : t;
+
   const events = subtitles
-    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${formatEmphasis(sub.text)}`)
+    .map(sub => `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${formatEmphasis(applyTextCase(sub.text))}`)
     .join('\n');
 
   return header + events + '\n';
