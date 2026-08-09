@@ -186,12 +186,14 @@ function buildAss(subtitles: any[], style: any): string {
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
   // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
+  // clean preset: no real stroke, deeper drop shadow (soft-shadow look, no hard outline)
   // neon preset: thick colored outline, no shadow
   // bold preset: thick outline, no shadow
   // box presets (bgOpacity > 0): soft drop shadow behind the box for depth
   // others: standard outline + minimal shadow
   const shadowDepth = bgOpacity > 0 ? 3
     : style.preset === 'shadow' ? 3
+    : style.preset === 'clean' ? 4
     : style.preset === 'matrix' ? 2
     : style.preset === 'neon' ? 0
     : 0;
@@ -201,6 +203,8 @@ function buildAss(subtitles: any[], style: any): string {
   // BorderStyle=1: Outline = outline/stroke width
   const outlineWidth = bgOpacity > 0 ? 10  // generous box padding, pill-like breathing room
     : style.preset === 'minimal' ? 1
+    : style.preset === 'clean' ? 0.5   // barely-there stroke — shadow does the contrast work instead
+    : style.preset === 'viral' ? 4     // thick punchy stroke, matches the "Viral" preview
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
     : 2;
