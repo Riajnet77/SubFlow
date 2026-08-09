@@ -7,6 +7,7 @@ interface SubStyle {
   primaryColor: string; outlineColor: string;
   bgOpacity: number; preset: string; box: SubBox;
 }
+interface CustomPreset extends Partial<SubStyle> { label: string; emoji: string; }
 type Step = "upload" | "processing" | "edit" | "export";
 
 const LANGUAGES = [
@@ -62,7 +63,10 @@ const PRESETS: Record<string, Partial<SubStyle>> = {
   darkbox: { fontName: "Arial",       fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.85 },
   whitebox:{ fontName: "Arial",       fontSize: 18, primaryColor: "#000000", outlineColor: "#FFFFFF", bgOpacity: 0.9 },
   reels:   { fontName: "Impact",      fontSize: 28, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#FFFFFF", bgOpacity: 0 },
+  // FIX: outlineColor used to be "#FFFFFF" (same as primaryColor) — white text with a
+  // white outline and no shadow (see SubtitleBox) meant emphasis text vanished on any
+  // light part of the video. Outline is now black so the text always has contrast.
+  emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
 };
 const PRESET_LIST = [
   { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
@@ -79,6 +83,7 @@ const PRESET_LIST = [
 ];
 const DEFAULT_BOX: SubBox = { x: 5, y: 78, w: 90, h: 14 };
 const DEFAULT_STYLE: SubStyle = { fontSize: 26, fontName: "Impact", primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0, preset: "impact", box: DEFAULT_BOX };
+const CUSTOM_PRESETS_KEY = "subflow-custom-presets";
 
 function toTimecode(s: number) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60), ms = Math.round((s % 1) * 1000);
@@ -130,11 +135,17 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
   const pu = () => { drag.current = null; };
 
   const fs = Math.max(8, Math.round(style.fontSize * fontScale));
-  // Emphasis preset: no text-shadow (clean look)
-  const ts = style.preset === 'emphasis' ? 'none'
-    : style.bgOpacity === 0
+  const ts = style.bgOpacity === 0
     ? `1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     : "none";
+
+  // FIX: this used to be hardcoded to black (`rgba(0,0,0,...)`) no matter the preset,
+  // so the "White Box" preset always showed a black box in the preview even though the
+  // exported video correctly used white (server.ts picks the color from style.preset).
+  // Now the preview matches what actually gets burned into the exported video.
+  const boxBg = style.bgOpacity > 0
+    ? (style.preset === "whitebox" ? `rgba(255,255,255,${style.bgOpacity})` : `rgba(0,0,0,${style.bgOpacity})`)
+    : "transparent";
 
   const HANDLES = [
     { k: "nw", s: { top: -5, left: -5, cursor: "nw-resize" } },
@@ -164,7 +175,7 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
         text.includes('**') ? (
           <span style={{
             fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
-            background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+            background: boxBg,
             padding: style.bgOpacity > 0 ? "2px 8px" : "0", borderRadius: style.bgOpacity > 0 ? "3px" : "0",
             textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
             whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
@@ -178,7 +189,7 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
         ) : (
           <span style={{
             fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
-            background: style.bgOpacity > 0 ? `rgba(0,0,0,${style.bgOpacity})` : "transparent",
+            background: boxBg,
             padding: style.bgOpacity > 0 ? "2px 8px" : "0", borderRadius: style.bgOpacity > 0 ? "3px" : "0",
             textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
             whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
@@ -235,10 +246,13 @@ function ProcessingView({ fileName }: { fileName: string }) {
   );
 }
 
-function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
+function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, customPresets, onSaveCustomPreset, onDeleteCustomPreset }: {
   style: SubStyle; onChange: (s: SubStyle) => void;
   subtitles: Subtitle[]; onSubChange: (s: Subtitle[]) => void;
   currentTime: number;
+  customPresets: Record<string, CustomPreset>;
+  onSaveCustomPreset: (name: string) => void;
+  onDeleteCustomPreset: (key: string) => void;
 }) {
   const [tab, setTab] = useState<"style" | "subs">("style");
   const set = (p: Partial<SubStyle>) => {
@@ -249,7 +263,9 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
     onChange({ ...style, ...p, preset: changesVisual ? "custom" : style.preset });
   };
   const applyPreset = (k: string) => {
-    onChange({ ...style, ...PRESETS[k], preset: k });
+    const preset = PRESETS[k] ?? customPresets[k];
+    if (!preset) return;
+    onChange({ ...style, ...preset, preset: k });
     // When selecting emphasis, apply AI word emphasis to subtitles
     if (k === 'emphasis' && subtitles.length > 0) {
       fetch('/api/emphasis', {
@@ -261,6 +277,10 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
         .then(data => { if (data.subtitles) onSubChange(data.subtitles); })
         .catch(() => {}); // silently fail — subtitles stay as-is
     }
+  };
+  const handleSavePreset = () => {
+    const name = window.prompt("Name this preset:");
+    if (name && name.trim()) onSaveCustomPreset(name.trim());
   };
   const listRef = useRef<HTMLDivElement>(null);
   const activeIdx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
@@ -282,9 +302,18 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime }: {
       {tab === "style" && (
         <div className="tab-body">
           <div className="sec-label">Preset</div>
-          <div className="presets-wrap">{PRESET_LIST.map(p => (
-            <button key={p.key} className={`preset-pill ${style.preset === p.key ? "on" : ""}`} onClick={() => applyPreset(p.key)}>{p.emoji} {p.label}</button>
-          ))}</div>
+          <div className="presets-wrap">
+            {PRESET_LIST.map(p => (
+              <button key={p.key} className={`preset-pill ${style.preset === p.key ? "on" : ""}`} onClick={() => applyPreset(p.key)}>{p.emoji} {p.label}</button>
+            ))}
+            {Object.entries(customPresets).map(([key, p]) => (
+              <button key={key} className={`preset-pill custom ${style.preset === key ? "on" : ""}`} onClick={() => applyPreset(key)}>
+                {p.emoji} {p.label}
+                <span className="preset-del" onClick={e => { e.stopPropagation(); onDeleteCustomPreset(key); }}>×</span>
+              </button>
+            ))}
+            <button className="preset-pill save" onClick={handleSavePreset}>＋ Save current</button>
+          </div>
           <div className="divider" />
           <div className="sec-label">Font</div>
           <select className="sel" value={style.fontName} onChange={e => set({ fontName: e.target.value })}>{FONTS.map(f => <option key={f} value={f}>{f}</option>)}</select>
@@ -448,6 +477,35 @@ export default function App() {
   const [dispH, setDispH] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Custom presets — saved with a name via "＋ Save current", persisted across sessions.
+  const [customPresets, setCustomPresets] = useState<Record<string, CustomPreset>>(() => {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_PRESETS_KEY) || "{}"); } catch { return {}; }
+  });
+  const saveCustomPresets = (next: Record<string, CustomPreset>) => {
+    setCustomPresets(next);
+    try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)); } catch {}
+  };
+  const handleSaveCustomPreset = (name: string) => {
+    const key = "custom_" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now().toString(36);
+    const next = {
+      ...customPresets,
+      [key]: {
+        label: name.trim(), emoji: "⭐",
+        fontName: style.fontName, fontSize: style.fontSize,
+        primaryColor: style.primaryColor, outlineColor: style.outlineColor,
+        bgOpacity: style.bgOpacity,
+      },
+    };
+    saveCustomPresets(next);
+    setStyle(s => ({ ...s, preset: key }));
+  };
+  const handleDeleteCustomPreset = (key: string) => {
+    const next = { ...customPresets };
+    delete next[key];
+    saveCustomPresets(next);
+    if (style.preset === key) setStyle(s => ({ ...s, preset: "custom" }));
+  };
+
   const measureH = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -557,7 +615,10 @@ export default function App() {
                 </div>
                 <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
               </div>
-              <RightPanel style={style} onChange={setStyle} subtitles={subtitles} onSubChange={setSubtitles} currentTime={currentTime} />
+              <RightPanel
+                style={style} onChange={setStyle} subtitles={subtitles} onSubChange={setSubtitles} currentTime={currentTime}
+                customPresets={customPresets} onSaveCustomPreset={handleSaveCustomPreset} onDeleteCustomPreset={handleDeleteCustomPreset}
+              />
             </div>
           )}
 
@@ -647,8 +708,12 @@ const CSS = `
   .sec-label.mt8{margin-top:4px}
   .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:12px}
   .presets-wrap{display:flex;flex-wrap:wrap;gap:5px}
-  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:13px;padding:6px 12px;cursor:pointer;transition:all .2s;white-space:nowrap}
+  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:13px;padding:6px 12px;cursor:pointer;transition:all .2s;white-space:nowrap;position:relative}
   .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
+  .preset-pill.custom{padding-right:22px}
+  .preset-pill.save{border-style:dashed;color:var(--amb)}
+  .preset-del{position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:13px;line-height:1;color:var(--mut);padding:0 3px}
+  .preset-del:hover{color:var(--red)}
   .divider{height:1px;background:var(--brd);margin:4px 0}
   .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:14px;padding:9px 11px;cursor:pointer;outline:none;width:100%}
   .sel:focus{border-color:var(--amb)}
