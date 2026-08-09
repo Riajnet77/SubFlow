@@ -69,11 +69,10 @@ const PRESETS: Record<string, Partial<SubStyle>> = {
   // white outline and no shadow (see SubtitleBox) meant emphasis text vanished on any
   // light part of the video. Outline is now black so the text always has contrast.
   emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  // Static approximations of modern caption styles — no per-word sync animation
-  // (that needs word-level timing data we don't collect yet — see chat).
-  viral:   { fontName: "Impact",       fontSize: 32, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  clean:   { fontName: "Trebuchet MS", fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#333333", bgOpacity: 0 },
-  podcast: { fontName: "Verdana",      fontSize: 24, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.75 },
+  // Distinct signature looks — not just font swaps of existing presets.
+  viral:   { fontName: "Impact",       fontSize: 34, primaryColor: "#FFE500", outlineColor: "#000000", bgOpacity: 0 },
+  clean:   { fontName: "Trebuchet MS", fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
+  podcast: { fontName: "Verdana",      fontSize: 24, primaryColor: "#00E5FF", outlineColor: "#000000", bgOpacity: 0.75 },
 };
 const PRESET_LIST = [
   { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
@@ -145,7 +144,12 @@ function SubtitleBox({ text, style, onChange, fontScale }: {
   const pu = () => { drag.current = null; };
 
   const fs = Math.max(8, Math.round(style.fontSize * fontScale));
-  const ts = style.bgOpacity === 0
+  // 'clean' uses a real blurred drop shadow (soft, no visible outline) — a different
+  // technique from the hard 4-direction pseudo-outline every other preset uses, so it
+  // actually reads as a distinct "soft" look rather than a font swap of another preset.
+  const ts = style.preset === 'clean'
+    ? '0px 3px 10px rgba(0,0,0,0.55)'
+    : style.bgOpacity === 0
     ? `1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
     : "none";
 
