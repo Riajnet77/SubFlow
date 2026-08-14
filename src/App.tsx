@@ -671,7 +671,7 @@ export default function App() {
 
           {step === "export" && (
             <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={style} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} dispH={dispH} />
+              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={{ ...style, nativeW, nativeH, fontScale, browserH: dispH }} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} dispH={dispH} />
             </div>
           )}
         </main>
