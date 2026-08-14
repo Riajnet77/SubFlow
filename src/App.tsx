@@ -261,13 +261,15 @@ function ProcessingView({ fileName }: { fileName: string }) {
   );
 }
 
-function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, customPresets, onSaveCustomPreset, onDeleteCustomPreset }: {
+function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, customPresets, onSaveCustomPreset, onDeleteCustomPreset, onReset, stripEmphasisTags }: {
   style: SubStyle; onChange: (s: SubStyle) => void;
   subtitles: Subtitle[]; onSubChange: (s: Subtitle[]) => void;
   currentTime: number;
   customPresets: Record<string, CustomPreset>;
   onSaveCustomPreset: (name: string) => void;
   onDeleteCustomPreset: (key: string) => void;
+  onReset: () => void;
+  stripEmphasisTags: (subs: Subtitle[]) => Subtitle[];
 }) {
   const [tab, setTab] = useState<"style" | "subs">("style");
   const set = (p: Partial<SubStyle>) => {
@@ -280,13 +282,17 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, cust
   const applyPreset = (k: string) => {
     const preset = PRESETS[k] ?? customPresets[k];
     if (!preset) return;
+    // Strip emphasis tags when switching away from emphasis preset
+    if (style.preset === 'emphasis' && k !== 'emphasis') {
+      onSubChange(stripEmphasisTags(subtitles));
+    }
     onChange({ ...style, ...preset, preset: k });
     // When selecting emphasis, apply AI word emphasis to subtitles
     if (k === 'emphasis' && subtitles.length > 0) {
       fetch('/api/emphasis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subtitles }),
+        body: JSON.stringify({ subtitles: stripEmphasisTags(subtitles) }),
       })
         .then(r => r.json())
         .then(data => { if (data.subtitles) onSubChange(data.subtitles); })
@@ -328,6 +334,7 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, cust
               </button>
             ))}
             <button className="preset-pill save" onClick={handleSavePreset}>＋ Save current</button>
+            <button className="preset-pill reset" onClick={onReset} title="Reset style & subtitles">↺ Reset</button>
           </div>
           <div className="divider" />
           <div className="sec-label">Font</div>
@@ -484,6 +491,7 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState("");
   const [targetLang, setTargetLang] = useState("original");
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
+  const [originalSubtitles, setOriginalSubtitles] = useState<Subtitle[]>([]);
   const [style, setStyle] = useState<SubStyle>(DEFAULT_STYLE);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -521,6 +529,29 @@ export default function App() {
     if (style.preset === key) setStyle(s => ({ ...s, preset: "custom" }));
   };
 
+  const resetAll = () => {
+    setStyle(DEFAULT_STYLE);
+    if (originalSubtitles.length > 0) {
+      setSubtitles(originalSubtitles);
+    }
+  };
+
+  // Strip HTML emphasis tags from subtitles when switching away from emphasis preset
+  const stripEmphasisTags = (subs: Subtitle[]) => {
+    return subs.map(sub => ({
+      ...sub,
+      text: sub.text
+        .replace(/<b[^>]*>/gi, '')
+        .replace(/<\/b>/gi, '')
+        .replace(/<em[^>]*>/gi, '')
+        .replace(/<\/em>/gi, '')
+        .replace(/<strong[^>]*>/gi, '')
+        .replace(/<\/strong>/gi, '')
+        .replace(/<i[^>]*>/gi, '')
+        .replace(/<\/i>/gi, '')
+    }));
+  };
+
   const measureH = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -548,7 +579,7 @@ export default function App() {
       const res = await fetch("/api/transcribe", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
-      setSubtitles(data.subtitles); setStep("edit");
+      setSubtitles(data.subtitles); setOriginalSubtitles(data.subtitles); setStep("edit");
     } catch (e: any) { setError(e.message ?? "Unknown error."); setStep("upload"); }
   };
 
@@ -633,6 +664,7 @@ export default function App() {
               <RightPanel
                 style={style} onChange={setStyle} subtitles={subtitles} onSubChange={setSubtitles} currentTime={currentTime}
                 customPresets={customPresets} onSaveCustomPreset={handleSaveCustomPreset} onDeleteCustomPreset={handleDeleteCustomPreset}
+                onReset={resetAll} stripEmphasisTags={stripEmphasisTags}
               />
             </div>
           )}
@@ -727,6 +759,8 @@ const CSS = `
   .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
   .preset-pill.custom{padding-right:22px}
   .preset-pill.save{border-style:dashed;color:var(--amb)}
+  .preset-pill.reset{border-style:dashed;color:var(--red)}
+  .preset-pill.reset:hover{border-color:var(--red);background:rgba(239,68,68,0.1)}
   .preset-del{position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:13px;line-height:1;color:var(--mut);padding:0 3px}
   .preset-del:hover{color:var(--red)}
   .divider{height:1px;background:var(--brd);margin:4px 0}
