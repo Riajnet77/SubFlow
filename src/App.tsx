@@ -374,7 +374,7 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, cust
                     <span className="tc-arr">→</span>
                     <input className="tc" defaultValue={toTimecode(sub.end)} onBlur={e => updTime(i, "end", e.target.value)} />
                   </div>
-                  <textarea className="si-txt" value={sub.text} onChange={e => updT(i, e.target.value)} rows={2} />
+                  <textarea className="si-txt" value={sub.text} onChange={e => updT(i, e.target.value)} rows={Math.max(2, Math.ceil(sub.text.length / 38))} />
                 </div>
                 <div className="si-meta">
                   <span className="cdot" style={{ background: sub.confidence > 0.85 ? "var(--grn)" : sub.confidence > 0.7 ? "var(--amb)" : "var(--red)" }} />
@@ -790,7 +790,7 @@ const CSS = `
   .tc{background:var(--s2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 7px;width:90px;outline:none}
   .tc:focus{border-color:var(--amb)}
   .tc-arr{color:var(--mut);font-size:9px}
-  .si-txt{background:transparent;border:none;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:14px;resize:none;outline:none;width:100%;line-height:1.5;padding:0}
+  .si-txt{background:transparent;border:none;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:14px;resize:vertical;outline:none;width:100%;line-height:1.5;padding:4px 0;min-height:42px;overflow-y:auto}
   .si-meta{grid-row:1/3;align-self:center;display:flex;flex-direction:column;align-items:center;gap:5px}
   .cdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
   .del-btn{background:none;border:none;color:var(--mut);font-size:14px;cursor:pointer;transition:color .2s;line-height:1}
