@@ -135,25 +135,13 @@ function buildAss(subtitles: any[], style: any): string {
   const playW = nativeW || 1280;
   const playH = nativeH || 720;
 
-  // Scale fontSize from preview px to native video px
-  // What the user saw on screen: fontSize * fontScale px
-  // scaledFontSize must match exactly what user sees in preview.
-  // Preview renders: fontSize * fontScale CSS px on screen.
-  // ASS with PlayResY=nativeH: fontSize in ASS = CSS px * (nativeH / browserH)
-  // = fontSize * fontScale * (nativeH / browserH)
-  // When fontScale = browserH/nativeH: = fontSize * (browserH/nativeH) * (nativeH/browserH) = fontSize
-  // BUT fontScale is NOT always browserH/nativeH — it depends on how the video fits the container.
-  // Use the actual fontScale sent from frontend for pixel-perfect match.
-  // fontSize is in preview px. Preview height = browserH, native height = nativeH (= playH).
-  // User saw: fontSize * fontScale px on screen (fontScale = browserH / nativeH)
-  // ASS with PlayResY=nativeH maps fontSize 1:1 to native px.
-  // To match preview: scaledFontSize = fontSize * fontScale * (nativeH / browserH)
-  //                                  = fontSize * (browserH/nativeH) * (nativeH/browserH)
-  //                                  = fontSize
-  // With FFmpeg 7.x (modern): fontSize * fontScale gives pixel-perfect match with preview
-  // fontScale = browserH / nativeH — what the user actually saw on screen
-  const fontScaleVal = style.fontScale && style.fontScale > 0 ? style.fontScale : 1;
-  const scaledFontSize = Math.round(fontSize * fontScaleVal);
+  // Scale fontSize from preset reference (1080p) to native video resolution.
+  // Presets are calibrated for 1080p videos. For other resolutions, scale proportionally
+  // so the subtitle occupies the same relative screen space.
+  // Preview already shows this correctly: fontSize * (dispH / nativeH).
+  // ASS with PlayResY=nativeH maps fontSize 1:1 to native pixels.
+  const REF_H = 1080;
+  const scaledFontSize = Math.max(8, Math.round(fontSize * (playH / REF_H)));
 
   const hexToAss = (hex: string, alpha = 0): string => {
     const c = hex.replace('#', '');
