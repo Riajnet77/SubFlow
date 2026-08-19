@@ -69,7 +69,7 @@ async function applyEmphasis(subtitles: any[], groq: any): Promise<any[]> {
   try {
     const texts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
     const chat = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-70b-versatile',
       messages: [
         {
           role: 'system',
@@ -487,7 +487,7 @@ async function startServer() {
         const translateBatch = async (batchSegments: typeof segments, offset: number) => {
           const numbered = batchSegments.map((s, i) => `${offset + i + 1}|||${s.text}`).join('\n');
           const chat = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
+            model: 'llama-3.1-70b-versatile',
             messages: [
               {
                 role: 'system',
@@ -591,7 +591,7 @@ Output: 1|||Olá mundo
         try {
           const emphTexts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
           const emphChat = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
+            model: 'llama-3.1-70b-versatile',
             messages: [
               {
                 role: 'system',
