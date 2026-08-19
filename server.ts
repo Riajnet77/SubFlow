@@ -10,10 +10,6 @@ import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
 // Use modern FFmpeg binary committed to repo if available.
-// NOTE: intentionally process.cwd(), not __dirname/import.meta.url — those break
-// once the Render build bundles this to CJS (import.meta.url is undefined there).
-// process.cwd() is already used the same way below for the fonts dir, and matches
-// __dirname's value in practice since server.ts always runs from the repo root.
 const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
 console.log('[ffmpeg] cwd:', process.cwd());
 console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
@@ -30,8 +26,7 @@ if (fs.existsSync(modernFfmpegPath)) {
 // Groq client — shared across routes
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-
-// Copy fonts to ~/.fonts where fontconfig finds them (required for static ffmpeg)
+// Copy fonts to ~/.fonts where fontconfig finds them
 const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
 const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
@@ -48,10 +43,10 @@ for (const f of TTF_FILES) {
 try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
 console.log('[fonts] Ready in', homeFontsDir);
 
-// Store uploads in memory for small files, disk for large — avoids /tmp write bottleneck
+// Store uploads in memory for small files, disk for large
 const upload = multer({
   dest: '/tmp/uploads/',
-  limits: { fileSize: 150 * 1024 * 1024 }, // 150 MB — ~10min video at typical bitrates
+  limits: { fileSize: 150 * 1024 * 1024 },
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -70,15 +65,6 @@ function buildSrt(subtitles: any[]): string {
     .join('\n');
 }
 
-/**
- * Build an ASS subtitle file from SubFlow style data.
- * ASS lets us control font, size, color, outline, background, and box position
- * precisely — and libass renders it correctly even on Render's stripped env.
- *
- * Position: ASS uses absolute pixel coords. We convert the % box (x,y,w,h)
- * to pixels using the style.browserW / browserH sent from the frontend.
- */
-// ── Emphasis preset: use LLM to identify key words and bold them ──────────────
 async function applyEmphasis(subtitles: any[], groq: any): Promise<any[]> {
   try {
     const texts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
@@ -134,12 +120,6 @@ function buildAss(subtitles: any[], style: any): string {
 
   const playW = nativeW || 1280;
   const playH = nativeH || 720;
-
-  // Scale fontSize from preset reference (1080p) to native video resolution.
-  // Presets are calibrated for 1080p videos. For other resolutions, scale proportionally
-  // so the subtitle occupies the same relative screen space.
-  // Preview already shows this correctly: fontSize * (dispH / nativeH).
-  // ASS with PlayResY=nativeH maps fontSize 1:1 to native pixels.
   const REF_H = 1080;
   const scaledFontSize = Math.max(8, Math.round(fontSize * (playH / REF_H)));
 
@@ -152,39 +132,19 @@ function buildAss(subtitles: any[], style: any): string {
     return `&H${a}${b}${g}${r}`.toUpperCase();
   };
 
-  // Map CSS font names to actual TTF filenames uploaded to repo root
   const FONT_MAP: Record<string, string> = {
-    'Impact': 'IMPACT',
-    'Arial': 'ARIAL',
-    'Georgia': 'GEORGIA',
-    'Verdana': 'VERDANA',
-    'Trebuchet MS': 'TREBUC',
-    'Tahoma': 'TAHOMA',
-    'Courier New': 'COUR',
+    'Impact': 'IMPACT', 'Arial': 'ARIAL', 'Georgia': 'GEORGIA', 'Verdana': 'VERDANA',
+    'Trebuchet MS': 'TREBUC', 'Tahoma': 'TAHOMA', 'Courier New': 'COUR',
   };
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
-  // SecondaryColour is only visually meaningful when a line uses \k karaoke tags
-  // (Viral preset, when word-level timestamps are available): text renders in
-  // SecondaryColour until its \k time elapses, then flips to PrimaryColour — that flip
-  // is the actual word-by-word highlight effect. White reads as a sensible "not yet
-  // spoken" base color under the gold "active" PrimaryColour Viral already uses.
   const secondaryAss = hexToAss('#FFFFFF', 0);
-  // BackColour doubles as the box's drop-shadow color under BorderStyle=3 — a soft
-  // semi-transparent black gives the box some visual depth instead of looking flat/pasted-on.
   const backColour = hexToAss('#000000', 0.5);
 
-  // Map presets to ASS effects — matching CSS preview as closely as possible
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox','viral','podcast'];
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
-  // shadow preset: thin outline + subtle drop shadow (matches CSS text-shadow)
-  // clean preset: no real stroke, deeper drop shadow (soft-shadow look, no hard outline)
-  // neon preset: thick colored outline, no shadow
-  // bold preset: thick outline, no shadow
-  // box presets (bgOpacity > 0): soft drop shadow behind the box for depth
-  // others: standard outline + minimal shadow
   const shadowDepth = bgOpacity > 0 ? 3
     : style.preset === 'shadow' ? 3
     : style.preset === 'clean' ? 4
@@ -192,25 +152,18 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'neon' ? 0
     : 0;
 
-  // BorderStyle=3: Outline = box padding around the text (auto-fits per line — this
-  // is what replaced the old fixed-size drawbox rectangle)
-  // BorderStyle=1: Outline = outline/stroke width
-  const outlineWidth = bgOpacity > 0 ? 10  // generous box padding, pill-like breathing room
+  const outlineWidth = bgOpacity > 0 ? 10  
     : style.preset === 'minimal' ? 1
-    : style.preset === 'clean' ? 0.5   // barely-there stroke — shadow does the contrast work instead
-    : style.preset === 'viral' ? 4     // thick punchy stroke, matches the "Viral" preview
+    : style.preset === 'clean' ? 0.5   
+    : style.preset === 'viral' ? 4     
     : style.preset === 'neon' ? 3
     : style.preset === 'bold' ? 3
     : 2;
 
-  // BorderStyle: 1=outline+shadow, 3=opaque box (BackColour = box bg)
   const borderStyle = bgOpacity > 0 ? 3 : 1;
 
-  // Position using Alignment=5 (middle-center) + MarginV as vertical offset from center
-  // This gives us full control over vertical position without fighting ASS alignment logic
   const marginL = Math.round((box.x / 100) * playW);
   const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
-  // alignment=2 (bottom-center): marginV = distance from bottom to bottom of box
   const marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
   const alignment = 2;
 
@@ -236,14 +189,6 @@ Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${out
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-  // Box color/contrast now comes straight from style.primaryColor / style.outlineColor
-  // (OutlineColour doubles as the box background under BorderStyle=3) — no per-preset
-  // color-forcing hack needed anymore.
-
-  // Convert **word** markers to ASS bold+size override tags for the emphasis preset.
-  // Mirrors the frontend preview exactly (SubtitleBox: emphasized word at 2.4x + bold,
-  // surrounding words shrunk to 0.8x) — previously this only bolded the word with no
-  // size change, so exported video barely resembled the dramatic preview effect.
   const emphasisBigSize = Math.round(scaledFontSize * 2.4);
   const emphasisSmallSize = Math.max(6, Math.round(scaledFontSize * 0.8));
   const formatEmphasis = (text: string): string => {
@@ -258,23 +203,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return part ? `{\\fs${emphasisSmallSize}}${part}` : part;
       })
       .join('');
-    console.log('[emphasis] sample:', result.slice(0, 100));
     return result;
   };
 
-  // Real Hormozi-style word bursts (ASS \k karaoke) for the Viral preset. Only 1-2
-  // words are shown on screen at a time — the whole sentence is NOT kept visible with
-  // colors just flipping inside it; each small word-group gets its own Dialogue line
-  // timed to exactly those words, so captions burst in rapid succession like
-  // CapCut/Opus-style captions, not a static sentence.
   const VIRAL_MAX_WORDS = 2;
 
-  // When real per-word timestamps aren't available (translated subtitles — the
-  // translated words don't correspond 1:1 to the original Whisper timing), approximate
-  // by splitting the subtitle's own start→end duration across its words, weighted by
-  // word length (a longer word gets proportionally more screen time than "a" or "e").
-  // Not phoneme-accurate, but gives the same word-burst effect in any language —
-  // Viral no longer only works when translation is off.
   const approximateWords = (sub: any): Array<{ word: string; start: number; end: number }> => {
     const wordList = String(sub.text).replace(/\*\*/g, '').trim().split(/\s+/).filter(Boolean);
     if (wordList.length === 0) return [];
@@ -331,11 +264,9 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // ── Job store (in-memory) ──────────────────────────────────────────────────
   type JobStatus = 'processing' | 'done' | 'error';
   const jobs = new Map<string, { status: JobStatus; error?: string; outputPath?: string }>();
 
-  // ── /api/emphasis ─────────────────────────────────────────────────────────────
   app.post('/api/emphasis', express.json(), async (req, res) => {
     try {
       const { subtitles } = req.body;
@@ -347,7 +278,6 @@ async function startServer() {
     }
   });
 
-  // ── /api/render ────────────────────────────────────────────────────────────
   app.post('/api/render', upload.single('video'), async (req, res) => {
     if (!req.file || !req.body.subtitles) {
       return res.status(400).json({ error: 'Video file and subtitles are required' });
@@ -361,24 +291,13 @@ async function startServer() {
     const outputPath = `/tmp/${id}_output.mp4`;
 
     jobs.set(id, { status: 'processing' });
-    res.json({ jobId: id }); // respond immediately — client will poll
+    res.json({ jobId: id });
 
-    // Process in background
     (async () => {
       try {
         const hasEmphasis = subtitles.some((s: any) => s.text && s.text.includes('**'));
         console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
-        // Log first subtitle to verify emphasis tags
-        if (hasEmphasis) {
-          const firstEmphasis = subtitles.find((s: any) => s.text && s.text.includes('**'));
-          console.log(`[render ${id}] Sample subtitle:`, firstEmphasis?.text?.slice(0, 100));
-        }
-
-        // Box rendering (whitebox/darkbox/cinema/classic/ice, or any custom bgOpacity>0)
-        // now goes entirely through buildAss's native ASS box (BorderStyle=3), which
-        // auto-fits its width to each line's actual text — replacing the old fixed-size
-        // ffmpeg drawbox rectangle that always drew the same oversized box regardless
-        // of how much text was in it.
+        
         const assContent = buildAss(subtitles, style);
         fs.writeFileSync(assPath, assContent);
         const vfFilter = `ass=${assPath}:fontsdir=${process.cwd()}`;
@@ -405,7 +324,6 @@ async function startServer() {
         });
 
         jobs.set(id, { status: 'done', outputPath });
-        // Clean up input files
         try { fs.unlinkSync(inputPath); } catch {}
         try { fs.unlinkSync(assPath); } catch {}
       } catch (e: any) {
@@ -418,14 +336,12 @@ async function startServer() {
     })();
   });
 
-  // ── /api/render/:id/status ─────────────────────────────────────────────────
   app.get('/api/render/:id/status', (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json({ status: job.status, error: job.error });
   });
 
-  // ── /api/render/:id/download ───────────────────────────────────────────────
   app.get('/api/render/:id/download', (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job || job.status !== 'done' || !job.outputPath) {
@@ -433,13 +349,11 @@ async function startServer() {
     }
     res.download(job.outputPath, 'subflow_export.mp4', err => {
       if (err) console.error(`[render ${req.params.id}] download error:`, err);
-      // cleanup after download
       try { fs.unlinkSync(job.outputPath!); } catch {}
       jobs.delete(req.params.id);
     });
   });
 
-  // ── /api/transcribe ────────────────────────────────────────────────────────
   app.post('/api/transcribe', upload.single('video'), async (req, res) => {
     const tmpFiles: string[] = [];
     const cleanup = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
@@ -450,13 +364,11 @@ async function startServer() {
       const targetLang = req.body.targetLang || 'original';
       const id = uuidv4();
       const inputPath = req.file.path;
-      // 64 kbps / 16 kHz mono — Whisper sweet spot, half the data vs 128 kbps stereo
       const audioPath = `/tmp/${id}_audio.mp3`;
       tmpFiles.push(inputPath, audioPath);
 
       console.log(`[transcribe ${id}] Extracting audio...`);
 
-      // Set fontconfig to _fonts directory (only TTF files, no noise)
       process.env.FONTCONFIG_PATH = path.join(process.cwd(), '_fonts');
       process.env.FC_FONT_PATH = path.join(process.cwd(), '_fonts');
 
@@ -465,8 +377,6 @@ async function startServer() {
           .noVideo()
           .audioCodec('libmp3lame')
           .audioBitrate(128)
-          // NO audioFrequency() resampling — it shifts pts and causes progressive drift
-          // aresample=async=1 fixes irregular pts from VFR sources (Instagram, TikTok, etc.)
           .audioChannels(1)
           .outputOptions(['-af', 'aresample=async=1', '-threads', '1'])
           .on('end', () => resolve())
@@ -479,11 +389,9 @@ async function startServer() {
 
       if (audioSize > 24 * 1024 * 1024) {
         cleanup();
-        return res.status(400).json({ error: 'Audio too large for transcription (max ~10 min). Please use a shorter video.' });
+        return res.status(400).json({ error: 'Audio too large for transcription (max ~10 min).' });
       }
 
-
-      // Step 1 — transcribe with retry on premature close
       let transcription: any;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -506,8 +414,7 @@ async function startServer() {
       const words: Array<{ start: number; end: number; word: string }> =
         (transcription as any).words ?? [];
 
-      // Step 2 — split long segments (>5s) into smaller chunks using word timestamps
-      const MAX_SEG_DURATION = 5; // seconds
+      const MAX_SEG_DURATION = 5;
       const splitSegments: Array<{ start: number; end: number; text: string }> = [];
 
       for (const seg of rawSegments) {
@@ -516,12 +423,9 @@ async function startServer() {
           splitSegments.push(seg);
           continue;
         }
-        // Get words that belong to this segment
         const segWords = words.filter(w => w.start >= seg.start && w.end <= seg.end + 0.1);
 
         if (segWords.length === 0) {
-          // No word timestamps — split by sentence punctuation or equal time chunks
-          // Split by words into chunks of MAX_SEG_DURATION seconds
           const allWords = seg.text.trim().split(' ').filter(Boolean);
           const numChunks = Math.max(1, Math.ceil(dur / MAX_SEG_DURATION));
           const wordsPerChunk = Math.ceil(allWords.length / numChunks);
@@ -539,7 +443,6 @@ async function startServer() {
           continue;
         }
 
-        // Group words into chunks of ~MAX_SEG_DURATION seconds
         let chunk: typeof segWords = [];
         let chunkStart = segWords[0].start;
         for (const w of segWords) {
@@ -565,10 +468,18 @@ async function startServer() {
 
       let segments = splitSegments;
 
-      // Step 3 — translate in batches of 20 to avoid LLM line-skipping on large inputs
+      // ── CORREÇÃO DA TRADUÇÃO AQUI ──
       console.log(`[transcribe ${id}] targetLang=${targetLang} segments=${segments.length}`);
+      
+      const LANG_MAP: Record<string, string> = {
+        'es': 'Spanish', 'pt': 'Portuguese', 'fr': 'French', 'de': 'German',
+        'it': 'Italian', 'ja': 'Japanese', 'ko': 'Korean', 'zh': 'Chinese',
+        'ru': 'Russian', 'ar': 'Arabic', 'hi': 'Hindi', 'en': 'English'
+      };
+      const fullLangName = LANG_MAP[targetLang.toLowerCase()] || targetLang;
+
       if (targetLang !== 'original' && segments.length > 0) {
-        console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${targetLang}...`);
+        console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${fullLangName}...`);
 
         const BATCH_SIZE = 15;
         const translationMap = new Map<number, string>();
@@ -580,7 +491,8 @@ async function startServer() {
             messages: [
               {
                 role: 'system',
-                content: `Translate each subtitle line to ${targetLang}.
+                content: `You are an expert translator. Translate each subtitle line to ${fullLangName}.
+CRITICAL RULE: The final output MUST be in ${fullLangName}. Do NOT output in English unless ${fullLangName} is English.
 Rules:
 - Each line starts with a number and ||| separator. Keep the exact same format.
 - Keep translations CONCISE — same length or shorter than the original. Use natural contractions.
@@ -604,7 +516,6 @@ Output: 1|||Olá mundo
           }
         };
 
-        // Process batches sequentially with retry
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
           const batch = segments.slice(i, i + BATCH_SIZE);
           let success = false;
@@ -628,7 +539,6 @@ Output: 1|||Olá mundo
         console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
       }
 
-      // Enforce max 42 chars per line, 2 lines max — industry standard for subtitles
       const MAX_CHARS = 42;
       const finalSegments: typeof segments = [];
       for (const seg of segments) {
@@ -637,7 +547,6 @@ Output: 1|||Olá mundo
           finalSegments.push(seg);
           continue;
         }
-        // Split into chunks of MAX_CHARS chars by word boundary
         const words = text.split(' ');
         const chunks: string[] = [];
         let current = '';
@@ -650,7 +559,6 @@ Output: 1|||Olá mundo
           }
         }
         if (current) chunks.push(current.trim());
-        // Group into pairs (2 lines per subtitle)
         const dur = seg.end - seg.start;
         const timePerChunk = dur / chunks.length;
         for (let i = 0; i < chunks.length; i += 2) {
@@ -663,7 +571,6 @@ Output: 1|||Olá mundo
         }
       }
 
-      // Build final subtitle objects
       let subtitles = finalSegments
         .filter(s => s.text.trim().length > 0)
         .map(s => ({
@@ -673,17 +580,12 @@ Output: 1|||Olá mundo
           confidence: 0.9,
         })) as Array<{ start: number; end: number; text: string; confidence: number; words?: Array<{ word: string; start: number; end: number }> }>;
 
-      // Attach per-word timestamps for real word-by-word highlighting (ASS \k karaoke,
-      // used by the Viral preset). Only when the subtitle text is still the original
-      // transcription — once translated, the words no longer correspond to these
-      // timings (different language, different word count/order).
       if (targetLang === 'original' && words.length > 0) {
         for (const sub of subtitles) {
           sub.words = words.filter(w => w.start >= sub.start - 0.05 && w.end <= sub.end + 0.15);
         }
       }
 
-      // Apply emphasis marking if requested
       if (req.body.emphasis === 'true' && subtitles.length > 0) {
         console.log(`[transcribe ${id}] Applying emphasis...`);
         try {
@@ -729,7 +631,6 @@ Output: 1|||you need to find the **demand**`,
     }
   });
 
-  // ── /api/export/srt ────────────────────────────────────────────────────────
   app.post('/api/export/srt', (req, res) => {
     const { subtitles } = req.body;
     if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
@@ -738,7 +639,6 @@ Output: 1|||you need to find the **demand**`,
     res.send(buildSrt(subtitles));
   });
 
-  // ── /api/export/vtt ────────────────────────────────────────────────────────
   app.post('/api/export/vtt', (req, res) => {
     const { subtitles } = req.body;
     if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
@@ -753,7 +653,6 @@ Output: 1|||you need to find the **demand**`,
     res.send(vtt);
   });
 
-  // ── Vite / static ──────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -766,10 +665,9 @@ Output: 1|||you need to find the **demand**`,
     app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  // Increase timeout for render requests (FFmpeg can take >30s)
   app.use((req, res, next) => {
     if (req.path === '/api/render') {
-      req.socket.setTimeout(300000); // 5 minutes
+      req.socket.setTimeout(300000);
       res.setTimeout(300000);
     }
     next();
