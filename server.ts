@@ -293,7 +293,7 @@ async function startServer() {
         const assContent = buildAss(subtitles, style);
         fs.writeFileSync(assPath, assContent);
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
-        const vfFilter = `ass="${assEsc}":fontsdir=${process.cwd()}`;
+        const vfFilter = `ass="${assEsc}"`;
 
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
