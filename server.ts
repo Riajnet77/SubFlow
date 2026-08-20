@@ -220,7 +220,7 @@ async function startServer() {
 
       await new Promise<void>((resolve,reject)=>{
         ffmpeg(videoPath).videoCodec("libx264")
-          .outputOptions(["-vf",`ass='${assEsc}'`,"-preset","ultrafast","-crf","23","-movflags","+faststart"])
+          .outputOptions(["-vf",`ass="${assEsc}"`,"-preset","ultrafast","-crf","23","-movflags","+faststart"])
           .audioCodec("aac").audioBitrate("128k")
           .on("end",resolve).on("error",reject).save(outPath);
       });
