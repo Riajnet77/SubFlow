@@ -60,22 +60,17 @@ function getVideoDimensions(fp:string): Promise<{w:number;h:number}> {
   });
 }
 
-// Build ASS file content — called with actual video dimensions
 function buildAss(
   subs:{start:number;end:number;text:string}[],
   opts:{vw:number;vh:number;fontName:string;fontSize:number;primCol:string;outCol:string;bgOp:number;box:{x:number;y:number;w:number;h:number}}
 ): string {
   const {vw,vh,fontName,fontSize,primCol,outCol,bgOp,box} = opts;
 
-  // PlayResX=vw, PlayResY=vh → FontSize in REAL video pixels (1:1 match with preview)
   const boxTopPx    = Math.round(box.y / 100 * vh);
   const boxBottomPx = Math.round((box.y + box.h) / 100 * vh);
   const boxCenterX  = Math.round((box.x + box.w/2) / 100 * vw);
   const mL = Math.max(0, Math.round(box.x / 100 * vw));
   const mR = Math.max(0, Math.round((100 - box.x - box.w) / 100 * vw));
-
-  // alignment=2 bottom-center: text BOTTOM at (vh - mV) px from top
-  // Set mV so bottom of text = bottom of box
   const mV = Math.max(0, vh - boxBottomPx);
 
   const bgAlpha = Math.round((1-bgOp)*255).toString(16).padStart(2,"0").toUpperCase();
@@ -100,8 +95,6 @@ function buildAss(
     "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
   ];
 
-  // \an2\pos(cx, boxBottomPx): bottom-center at exact box bottom pixel
-  // Both margin-based AND \pos ensure position even if one is ignored by libass
   const events = subs.map(s => {
     const txt = s.text.trim().replace(/\n/g, "\\N");
     return `Dialogue: 0,${toAssTime(s.start)},${toAssTime(s.end)},Default,,0,0,0,,{\\an2\\pos(${boxCenterX},${boxBottomPx})}${txt}`;
@@ -158,14 +151,14 @@ async function startServer() {
         return splitSeg(seg,conf);
       });
 
-      // Translate line by line — guaranteed no size mismatch
+      // Translate line by line
       if(targetLang!=="original" && langName && subtitles.length>0){
         console.log(`[translate] ${subtitles.length} lines → ${langName}`);
         const translated:string[]=[];
         for(const sub of subtitles){
           try{
             const r=await groq.chat.completions.create({
-              model:"llama-3.3-70b-versatile", temperature:0.1, max_tokens:200,
+              model:"openai/gpt-oss-120b", temperature:0.1, max_tokens:200,
               messages:[
                 {role:"system", content:`Translate to ${langName}. Reply with ONLY the translation, nothing else.`},
                 {role:"user", content:sub.text},
@@ -201,8 +194,6 @@ async function startServer() {
       const style  = req.body.style ? JSON.parse(req.body.style) : {};
       const box    = style.box ?? {x:5,y:78,w:90,h:14};
       const {w:ffW,h:ffH} = await getVideoDimensions(videoPath);
-      // Use browser-reported native dimensions for ASS PlayRes so font scale matches preview
-      // If browser sent them, prefer those; otherwise fall back to ffprobe
       const bW = Number(style.browserW||0);
       const bH = Number(style.browserH||0);
       const vw = bW>0 ? bW : ffW;
@@ -221,11 +212,9 @@ async function startServer() {
 
       fs.writeFileSync(assPath, assContent, "utf8");
 
-      // Log first 3 lines of [Events] for debugging
       const evtLines = assContent.split("\n").filter(l=>l.startsWith("Dialogue:")).slice(0,2);
       evtLines.forEach(l=>console.log("[ass]",l.slice(0,100)));
 
-      // Windows-safe path escaping for ffmpeg ass filter
       const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
       console.log("[render] ass="+assEsc);
 
@@ -271,7 +260,6 @@ async function startServer() {
   });
 
   if(process.env.NODE_ENV!=="production"){
-    // In dev mode, dynamically import Vite to avoid bundling it
     const {createServer:createViteServer}=await import("vite");
     const vite=await createViteServer({server:{middlewareMode:true},appType:"spa"});
     app.use(vite.middlewares);
@@ -280,151 +268,8 @@ async function startServer() {
     app.use(express.static(dist));
     app.get(/^(?!\/api\/).*$/,(_req,res)=>res.sendFile(path.join(dist,"index.html")));
   }
+  
   app.listen(PORT,"0.0.0.0",()=>console.log(`\n🎬 SubFlow → http://localhost:${PORT}\n`));
 }
-// Build: 2026-08-20 11:52
-// Build: 2026-08-20 11:53
-startServer().catch(e=>{console.error("Server failed:",e);process.exit(1);});if(targetLang!=="original"&&langName&&subtitles.length>0){
-        console.log("[translate] "+subtitles.length+" lines → "+langName);
-        const BATCH=20;
-        const allTexts=subtitles.map(s=>s.text);
-        const translated:string[]=[...allTexts]; // default to originals
 
-        for(let i=0;i<allTexts.length;i+=BATCH){
-          const batch=allTexts.slice(i,i+BATCH);
-          // Send numbered lines so LLM preserves order
-          const numbered=batch.map((t,j)=>`${i+j+1}. ${t}`).join("\n");
-          try{
-            const resp=await groq.chat.completions.create({
-              model:"llama-3.3-70b-versatile",temperature:0.1,max_tokens:3000, // translation model
-              messages:[
-                {role:"system",content:`Translate each numbered subtitle line to ${langName}. Keep the same numbering. Return ONLY the numbered lines in order, one per line. Format: "N. translated text"`},
-                {role:"user",content:numbered},
-              ],
-            });
-            const raw=(resp.choices[0].message.content??"").trim();
-            console.log("[translate] batch "+(Math.floor(i/BATCH)+1)+" raw preview: "+raw.slice(0,80));
-            // Parse numbered lines back
-            const lines=raw.split("\n").filter(l=>l.trim());
-            for(const line of lines){
-              const m=line.match(/^(\d+)[\.\)\:]\s*(.+)/);
-              if(m){
-                const idx=parseInt(m[1])-1; // 0-based
-                const text=m[2].trim();
-                if(idx>=0&&idx<allTexts.length&&text){
-                  translated[idx]=text;
-                }
-              }
-            }
-          }catch(e:any){
-            console.error("[translate] batch error: "+e?.message);
-          }
-        }
-        subtitles=subtitles.map((s,i)=>({...s,text:translated[i]??s.text}));
-        console.log("[translate] done. Sample: "+translated[0]);
-      }
-      res.json({subtitles});
-    } catch(err:any){
-      console.error("[transcribe]",err?.message);
-      res.status(500).json({error:err?.message??"Transcription failed."});
-    } finally { cleanup(videoPath,audioPath); }
-  });
-
-  // RENDER
-  app.post("/api/render", upload.single("video"), async (req,res)=>{
-    const videoPath=req.file?.path??"";
-    const id=uuidv4();
-    const assPath=path.join(WORK_DIR, id+".ass");
-    const outPath=path.join(WORK_DIR, id+"_out.mp4");
-    try{
-      if(!req.file||!req.body.subtitles){res.status(400).json({error:"Missing data."});return;}
-      const subs:{start:number;end:number;text:string}[]=JSON.parse(req.body.subtitles);
-      if(!subs.length){res.status(400).json({error:"No subtitles."});return;}
-
-      const style  = req.body.style ? JSON.parse(req.body.style) : {};
-      const box    = style.box ?? {x:5,y:78,w:90,h:14};
-      const {w:ffW,h:ffH} = await getVideoDimensions(videoPath);
-      // Use browser-reported native dimensions for ASS PlayRes so font scale matches preview
-      // If browser sent them, prefer those; otherwise fall back to ffprobe
-      const bW = Number(style.browserW||0);
-      const bH = Number(style.browserH||0);
-      const vw = bW>0 ? bW : ffW;
-      const vh = bH>0 ? bH : ffH;
-      console.log(`[render] ffprobe=${ffW}x${ffH} browser=${bW}x${bH} using=${vw}x${vh} fontSize=${style.fontSize} box=${JSON.stringify(box)}`);
-
-      const assContent = buildAss(subs, {
-        vw, vh,
-        fontName: String(style.fontName??"Arial"),
-        fontSize: Number(style.fontSize??18),
-        primCol:  String(style.primaryColor??"#FFFFFF"),
-        outCol:   String(style.outlineColor??"#000000"),
-        bgOp:     Number(style.bgOpacity??0),
-        box,
-      });
-
-      fs.writeFileSync(assPath, assContent, "utf8");
-
-      // Log first 3 lines of [Events] for debugging
-      const evtLines = assContent.split("\n").filter(l=>l.startsWith("Dialogue:")).slice(0,2);
-      evtLines.forEach(l=>console.log("[ass]",l.slice(0,100)));
-
-      // Windows-safe path escaping for ffmpeg ass filter
-      const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
-      console.log("[render] ass="+assEsc);
-
-      await new Promise<void>((resolve,reject)=>{
-        ffmpeg(videoPath).videoCodec("libx264")
-          .outputOptions(["-vf",`ass='${assEsc}'`,"-preset","ultrafast","-crf","23","-movflags","+faststart"])
-          .audioCodec("aac").audioBitrate("128k")
-          .on("end",resolve).on("error",reject).save(outPath);
-      });
-
-      console.log("[render] done");
-      res.download(outPath,"subflow_export.mp4",()=>cleanup(videoPath,assPath,outPath));
-    } catch(err:any){
-      console.error("[render]",err?.message??err);
-      cleanup(videoPath,assPath,outPath);
-      if(!res.headersSent) res.status(500).json({error:err?.message??"Render failed."});
-    }
-  });
-
-  // EXPORT SRT
-  app.post("/api/export/srt",(req,res)=>{
-    try{
-      const{subtitles}=req.body;
-      if(!Array.isArray(subtitles)){res.status(400).json({error:"subtitles required."});return;}
-      res.setHeader("Content-Type","text/plain; charset=utf-8");
-      res.setHeader("Content-Disposition",'attachment; filename="subtitles.srt"');
-      res.send(buildSrt(subtitles));
-    }catch(e:any){res.status(500).json({error:e?.message});}
-  });
-
-  // EXPORT VTT
-  app.post("/api/export/vtt",(req,res)=>{
-    try{
-      const{subtitles}=req.body;
-      if(!Array.isArray(subtitles)){res.status(400).json({error:"subtitles required."});return;}
-      const vtt="WEBVTT\n\n"+subtitles.map((s:any,i:number)=>
-        `${i+1}\n${toSrtTime(s.start).replace(",",".")} --> ${toSrtTime(s.end).replace(",",".")}\n${s.text.trim()}`
-      ).join("\n\n")+"\n";
-      res.setHeader("Content-Type","text/vtt; charset=utf-8");
-      res.setHeader("Content-Disposition",'attachment; filename="subtitles.vtt"');
-      res.send(vtt);
-    }catch(e:any){res.status(500).json({error:e?.message});}
-  });
-
-  if(process.env.NODE_ENV!=="production"){
-    // In dev mode, dynamically import Vite to avoid bundling it
-    const {createServer:createViteServer}=await import("vite");
-    const vite=await createViteServer({server:{middlewareMode:true},appType:"spa"});
-    app.use(vite.middlewares);
-  }else{
-    const dist=path.join(process.cwd(),"dist");
-    app.use(express.static(dist));
-    app.get(/^(?!\/api\/).*$/,(_req,res)=>res.sendFile(path.join(dist,"index.html")));
-  }
-  app.listen(PORT,"0.0.0.0",()=>console.log(`\n🎬 SubFlow → http://localhost:${PORT}\n`));
-}
-// Build: 2026-08-20 11:52
-// Build: 2026-08-20 11:53
 startServer().catch(e=>{console.error("Server failed:",e);process.exit(1);});
