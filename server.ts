@@ -28,14 +28,13 @@ const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
 const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
 if (!fs.existsSync(homeFontsDir)) fs.mkdirSync(homeFontsDir, { recursive: true });
-const TTF_FILES = ['ARIAL.TTF','ARIALBD.TTF','ARIALI.TTF','ARIALBI.TTF','IMPACT.TTF','GEORGIA.TTF','VERDANA.TTF','VERDANAB.TTF',
-  'TREBUC.TTF','TREBUCBD.TTF','TAHOMA.TTF','TAHOMABD.TTF','COUR.TTF','COURBD.TTF'];
-for (const f of TTF_FILES) {
+
+const rootFiles = fs.readdirSync(process.cwd()).filter(f => f.toUpperCase().endsWith('.TTF'));
+for (const f of rootFiles) {
   const src = path.join(process.cwd(), f);
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, path.join(fontsDir, f));
-    fs.copyFileSync(src, path.join(homeFontsDir, f));
-  }
+  const cleanName = f.replace(/^\d+_/, '');
+  fs.copyFileSync(src, path.join(fontsDir, cleanName));
+  fs.copyFileSync(src, path.join(homeFontsDir, cleanName));
 }
 try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
 console.log('[fonts] Ready in', homeFontsDir);
@@ -177,7 +176,7 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -293,7 +292,7 @@ async function startServer() {
         const assContent = buildAss(subtitles, style);
         fs.writeFileSync(assPath, assContent);
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
-        const vfFilter = "ass=" + assEsc + ""; `ass="${assEsc}"`;
+        const vfFilter = "ass=" + assEsc + "";
 
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
@@ -637,7 +636,7 @@ Output: 1|||you need to find the **demand**`,
         const fmt = (s: number) => formatSrtTime(s).replace(',', '.');
         return `${i + 1}\n${fmt(sub.start)} --> ${fmt(sub.end)}\n${sub.text}`;
       })
-      .join('\n\n');
+      .join('\n\n') + '\n';
     res.setHeader('Content-Disposition', 'attachment; filename="subtitles.vtt"');
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     res.send(vtt);
