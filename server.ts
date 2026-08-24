@@ -140,6 +140,14 @@ function buildAss(subtitles: any[], style: any): string {
     'Tahoma': 'TAHOMA',
     'Courier New': 'COUR',
   };
+
+  // Se houver caracteres acentuados e a fonte for Impact, usa Arial como fallback
+  // porque algumas versões do Impact no Linux não têm glifos para Latin Extended
+  const hasAccentedChars = subtitles.some((s: any) => /[^\x00-\x7F]/.test(s.text));
+  const finalFontName = (hasAccentedChars && fontName === 'IMPACT') ? 'ARIAL' : fontName;
+  if (hasAccentedChars && fontName === 'IMPACT') {
+    console.warn(`[buildAss] Detected accented chars, switching font from IMPACT to ARIAL for better rendering`);
+  }
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
@@ -147,7 +155,7 @@ function buildAss(subtitles: any[], style: any): string {
   const backColour = hexToAss('#000000', 0.5);
 
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox','viral','podcast'];
-  const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
+  const isBold = impactPresets.includes(style.preset) || rawFontName === 'Impact' ? '-1' : '0';
 
   const shadowDepth = bgOpacity > 0 ? 3
     : style.preset === 'shadow' ? 3
@@ -187,7 +195,7 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${finalFontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -290,20 +298,6 @@ async function startServer() {
     const subtitles: any[] = JSON.parse(req.body.subtitles);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
-
-    // DIAGNÓSTICO: Loga os primeiros subtítulos recebidos para confirmar idioma
-    const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
-    console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
-    console.log(`[render ${id}] Style preset=${style.preset} targetLang=${style.targetLang || 'none'}`);
-
-    // Validação: se o style indica tradução mas os subtítulos parecem em inglês, loga alerta
-    if (style.targetLang && style.targetLang !== 'original' && style.targetLang !== 'en') {
-      const isProbablyEnglish = sampleTexts.every((t: string) => /^[a-zA-Z0-9\s.,!?;:'"-]+$/.test(t));
-      if (isProbablyEnglish) {
-        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English. Frontend may be sending original subtitles instead of translated ones.`);
-      }
-    }
-
     const inputPath = req.file.path;
     const assPath = `/tmp/${id}.ass`;
     const outputPath = `/tmp/${id}_output.mp4`;
@@ -317,7 +311,9 @@ async function startServer() {
         console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
         
         const assContent = buildAss(subtitles, style);
-        fs.writeFileSync(assPath, assContent);
+        // Escreve .ass com BOM UTF-8 para libass reconhecer acentos corretamente
+    fs.writeFileSync(assPath, '﻿' + assContent, 'utf8');
+    console.log(`[render ${id}] ASS file written. First 200 chars:`, assContent.slice(0, 200));
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
         
         // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
