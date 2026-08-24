@@ -140,6 +140,7 @@ function buildAss(subtitles: any[], style: any): string {
     'Tahoma': 'TAHOMA',
     'Courier New': 'COUR',
   };
+  const fontName = FONT_MAP[rawFontName] || rawFontName;
 
   // Se houver caracteres acentuados e a fonte for Impact, usa Arial como fallback
   // porque algumas versões do Impact no Linux não têm glifos para Latin Extended
@@ -148,7 +149,7 @@ function buildAss(subtitles: any[], style: any): string {
   if (hasAccentedChars && fontName === 'IMPACT') {
     console.warn(`[buildAss] Detected accented chars, switching font from IMPACT to ARIAL for better rendering`);
   }
-  const fontName = FONT_MAP[rawFontName] || rawFontName;
+
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
   const secondaryAss = hexToAss('#FFFFFF', 0);
