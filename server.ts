@@ -325,11 +325,11 @@ async function startServer() {
         console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
         dialogueLines.slice(0, 3).forEach((line: string, i: number) => console.log(`  ${i+1}. ${line}`));
 
-        // Chama FFmpeg diretamente via spawn — fluent-ffmpeg não passa -vf corretamente
+        // Chama FFmpeg diretamente via spawn — fluent-ffmpeg ignora/perde argumentos
         const { spawn } = require('child_process');
         const ffmpegArgs = [
-          '-i', inputPath,
           '-y',
+          '-i', inputPath,
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-crf', '23',
