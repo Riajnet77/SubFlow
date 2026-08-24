@@ -290,6 +290,20 @@ async function startServer() {
     const subtitles: any[] = JSON.parse(req.body.subtitles);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
+
+    // DIAGNÓSTICO: Loga os primeiros subtítulos recebidos para confirmar idioma
+    const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
+    console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
+    console.log(`[render ${id}] Style preset=${style.preset} targetLang=${style.targetLang || 'none'}`);
+
+    // Validação: se o style indica tradução mas os subtítulos parecem em inglês, loga alerta
+    if (style.targetLang && style.targetLang !== 'original' && style.targetLang !== 'en') {
+      const isProbablyEnglish = sampleTexts.every((t: string) => /^[a-zA-Z0-9\s.,!?;:'"-]+$/.test(t));
+      if (isProbablyEnglish) {
+        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English. Frontend may be sending original subtitles instead of translated ones.`);
+      }
+    }
+
     const inputPath = req.file.path;
     const assPath = `/tmp/${id}.ass`;
     const outputPath = `/tmp/${id}_output.mp4`;
