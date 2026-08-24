@@ -244,7 +244,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         prevEnd = w.end;
       }
       // CORREÇÃO 3: Margem correta no Karaoke
-      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,${text.trim()}`);
+      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
     }
     return lines;
   };
