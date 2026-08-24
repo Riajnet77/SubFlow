@@ -341,18 +341,39 @@ async function startServer() {
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
         
         // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
-        const vfFilter = "ass=" + assEsc + "";
+        // Se o vídeo original tem legendas queimadas (hardcoded), cobre a área com blur/caixa
+        // antes de desenhar as legendas novas
+        const maskBox = style.maskBox; // {x%, y%, w%, h%} ou undefined
+        let vfFilter: string;
+
+        if (maskBox && maskBox.w > 0 && maskBox.h > 0) {
+          // Cobertura customizada (usuário definiu área exata das legendas antigas)
+          const mx = Math.round((maskBox.x / 100) * playW);
+          const my = Math.round((maskBox.y / 100) * playH);
+          const mw = Math.round((maskBox.w / 100) * playW);
+          const mh = Math.round((maskBox.h / 100) * playH);
+          vfFilter = `drawbox=x=${mx}:y=${my}:w=${mw}:h=${mh}:color=black@0.85:t=fill,ass=` + assEsc;
+          console.log(`[render ${id}] Using custom maskBox: x=${mx} y=${my} w=${mw} h=${mh}`);
+        } else {
+          // Auto-detect: cobre a parte inferior do vídeo onde normalmente ficam legendas
+          // Usa drawbox preto semi-transparente + blur leve para não ficar tão artificial
+          const maskY = Math.round(playH * 0.78);
+          const maskH = Math.round(playH * 0.22);
+          vfFilter = `drawbox=x=0:y=${maskY}:w=${playW}:h=${maskH}:color=black@0.75:t=fill,ass=` + assEsc;
+          console.log(`[render ${id}] Using auto bottom mask: y=${maskY} h=${maskH}`);
+        }
 
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
+            .videoFilters(vfFilter)
             .outputOptions([
               '-c:v libx264',
               '-preset ultrafast',
               '-crf 23',
               '-threads 1',
               '-tune fastdecode',
-              `-vf ${vfFilter}`,
               '-c:a copy',
+              '-sn',
               '-movflags +faststart',
               '-f mp4',
             ])
