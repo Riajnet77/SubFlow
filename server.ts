@@ -9,6 +9,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 
+// Use modern FFmpeg binary committed to repo if available.
 const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
 console.log('[ffmpeg] cwd:', process.cwd());
 console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
@@ -22,13 +23,16 @@ if (fs.existsSync(modernFfmpegPath)) {
   console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
 }
 
+// Groq client
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// Copy fonts to ~/.fonts
 const fontsDir = path.join(process.cwd(), '_fonts');
 if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
 const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
 if (!fs.existsSync(homeFontsDir)) fs.mkdirSync(homeFontsDir, { recursive: true });
 
+// CORREÇÃO 1: Busca fontes dinamicamente e remove números do nome
 const rootFiles = fs.readdirSync(process.cwd()).filter(f => f.toUpperCase().endsWith('.TTF'));
 for (const f of rootFiles) {
   const src = path.join(process.cwd(), f);
@@ -62,6 +66,7 @@ async function applyEmphasis(subtitles: any[], groq: any): Promise<any[]> {
   try {
     const texts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
     const chat = await groq.chat.completions.create({
+      // CORREÇÃO 2: Modelo correto da Groq
       model: 'openai/gpt-oss-120b',
       messages: [
         {
@@ -113,11 +118,12 @@ function buildAss(subtitles: any[], style: any): string {
 
   const playW = nativeW || 1280;
   const playH = nativeH || 720;
+
   const REF_H = 1080;
   const scaledFontSize = Math.max(8, Math.round(fontSize * (playH / REF_H)));
 
   const hexToAss = (hex: string, alpha = 0): string => {
-    const c = hex.replace('#', '');
+    const c = hex.replace('#', '').padEnd(6, '0');
     const r = c.slice(0, 2);
     const g = c.slice(2, 4);
     const b = c.slice(4, 6);
@@ -126,8 +132,13 @@ function buildAss(subtitles: any[], style: any): string {
   };
 
   const FONT_MAP: Record<string, string> = {
-    'Impact': 'IMPACT', 'Arial': 'ARIAL', 'Georgia': 'GEORGIA', 'Verdana': 'VERDANA',
-    'Trebuchet MS': 'TREBUC', 'Tahoma': 'TAHOMA', 'Courier New': 'COUR',
+    'Impact': 'IMPACT',
+    'Arial': 'ARIAL',
+    'Georgia': 'GEORGIA',
+    'Verdana': 'VERDANA',
+    'Trebuchet MS': 'TREBUC',
+    'Tahoma': 'TAHOMA',
+    'Courier New': 'COUR',
   };
   const fontName = FONT_MAP[rawFontName] || rawFontName;
   const primaryAss = hexToAss(primaryColor, 0);
@@ -232,7 +243,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text += `{\\k${durCs}}${word} `;
         prevEnd = w.end;
       }
-      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,0,0,0,,${text.trim()}`);
+      // CORREÇÃO 3: Margem correta no Karaoke
+      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,${text.trim()}`);
     }
     return lines;
   };
@@ -241,7 +253,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     .flatMap(sub => {
       if (style.preset === 'viral') return buildKaraokeLines(sub);
       const text = formatEmphasis(sub.text);
-      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,0,0,0,,${text}`];
+      // CORREÇÃO 4: Margem correta na legenda normal
+      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,,,${text}`];
     })
     .join('\n');
 
@@ -275,7 +288,6 @@ async function startServer() {
     }
 
     const subtitles: any[] = JSON.parse(req.body.subtitles);
-    console.log("[RENDER_DEBUG] First subtitle text:", subtitles[0]?.text);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
     const inputPath = req.file.path;
@@ -293,6 +305,8 @@ async function startServer() {
         const assContent = buildAss(subtitles, style);
         fs.writeFileSync(assPath, assContent);
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
+        
+        // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
         const vfFilter = "ass=" + assEsc + "";
 
         await new Promise<void>((resolve, reject) => {
