@@ -275,6 +275,7 @@ async function startServer() {
     }
 
     const subtitles: any[] = JSON.parse(req.body.subtitles);
+    console.log("[RENDER_DEBUG] First subtitle text:", subtitles[0]?.text);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
     const inputPath = req.file.path;
