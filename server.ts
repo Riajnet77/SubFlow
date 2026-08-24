@@ -254,7 +254,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       if (style.preset === 'viral') return buildKaraokeLines(sub);
       const text = formatEmphasis(sub.text);
       // CORREÇÃO 4: Margem correta na legenda normal
-      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,,,${text}`];
+      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${text}`];
     })
     .join('\n');
 
