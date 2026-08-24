@@ -142,12 +142,11 @@ function buildAss(subtitles: any[], style: any): string {
   };
   const fontName = FONT_MAP[rawFontName] || rawFontName;
 
-  // Se houver caracteres acentuados e a fonte for Impact, usa Arial como fallback
-  // porque algumas versões do Impact no Linux não têm glifos para Latin Extended
+  // Fallback: se houver acentos e fonte for Impact, usa Arial (melhor suporte Linux)
   const hasAccentedChars = subtitles.some((s: any) => /[^\x00-\x7F]/.test(s.text));
   const finalFontName = (hasAccentedChars && fontName === 'IMPACT') ? 'ARIAL' : fontName;
   if (hasAccentedChars && fontName === 'IMPACT') {
-    console.warn(`[buildAss] Detected accented chars, switching font from IMPACT to ARIAL for better rendering`);
+    console.warn(`[buildAss] Detected accented chars, switching font from IMPACT to ARIAL`);
   }
 
   const primaryAss = hexToAss(primaryColor, 0);
@@ -156,7 +155,7 @@ function buildAss(subtitles: any[], style: any): string {
   const backColour = hexToAss('#000000', 0.5);
 
   const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox','viral','podcast'];
-  const isBold = impactPresets.includes(style.preset) || rawFontName === 'Impact' ? '-1' : '0';
+  const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
   const shadowDepth = bgOpacity > 0 ? 3
     : style.preset === 'shadow' ? 3
@@ -300,16 +299,14 @@ async function startServer() {
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
 
-    // DIAGNÓSTICO: Loga os primeiros subtítulos recebidos para confirmar idioma
+    // DIAGNÓSTICO
     const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
     console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
     console.log(`[render ${id}] Style preset=${style.preset} targetLang=${style.targetLang || 'none'}`);
-
-    // Validação: se o style indica tradução mas os subtítulos parecem em inglês, loga alerta
     if (style.targetLang && style.targetLang !== 'original' && style.targetLang !== 'en') {
       const isProbablyEnglish = sampleTexts.every((t: string) => /^[a-zA-Z0-9\s.,!?;:'"-]+$/.test(t));
       if (isProbablyEnglish) {
-        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English. Frontend may be sending original subtitles instead of translated ones.`);
+        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English`);
       }
     }
 
@@ -326,70 +323,32 @@ async function startServer() {
         console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
         
         const assContent = buildAss(subtitles, style);
-        // Escreve .ass em UTF-8 puro (libass moderno detecta UTF-8 automaticamente)
-    fs.writeFileSync(assPath, assContent, 'utf8');
+        fs.writeFileSync(assPath, assContent, 'utf8');
 
-    // DEBUG: Salva cópia do .ass para inspeção manual
-    const debugAssPath = `/tmp/${id}_debug.ass`;
-    fs.writeFileSync(debugAssPath, assContent, 'utf8');
-    console.log(`[render ${id}] ASS debug saved to: ${debugAssPath}`);
+        // DEBUG: loga o conteúdo do .ass
+        const debugAssPath = `/tmp/${id}_debug.ass`;
+        fs.writeFileSync(debugAssPath, assContent, 'utf8');
+        const dialogueLines = assContent.split('\n').filter((line: string) => line.startsWith('Dialogue:'));
+        console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
+        dialogueLines.slice(0, 3).forEach((line: string, i: number) => console.log(`  ${i+1}. ${line}`));
 
-    // Loga os primeiros 3 dialogues para confirmar idioma no .ass
-    const dialogueLines = assContent.split('\n').filter(line => line.startsWith('Dialogue:'));
-    console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
-    dialogueLines.slice(0, 3).forEach((line, i) => console.log(`  ${i+1}. ${line}`));
-        const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
-        
-        // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
-        // Obtém dimensões do vídeo para calcular a máscara corretamente
-        let playW = 1280, playH = 720;
-        try {
-          const ffprobeOut = require('child_process').execSync(
-            `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`,
-            { encoding: 'utf8', timeout: 10000 }
-          ).trim();
-          const [w, h] = ffprobeOut.split('x').map(Number);
-          if (w && h) { playW = w; playH = h; }
-        } catch(e) {
-          console.warn(`[render ${id}] ffprobe failed, using default 1280x720`);
-        }
-        console.log(`[render ${id}] Video dimensions: ${playW}x${playH}`);
-
-        // Se o vídeo original tem legendas queimadas (hardcoded), cobre a área com blur/caixa
-        // antes de desenhar as legendas novas
-        const maskBox = style.maskBox; // {x%, y%, w%, h%} ou undefined
-        let vfFilter: string;
-
-        if (maskBox && maskBox.w > 0 && maskBox.h > 0) {
-          // Cobertura customizada (usuário definiu área exata das legendas antigas)
-          const mx = Math.round((maskBox.x / 100) * playW);
-          const my = Math.round((maskBox.y / 100) * playH);
-          const mw = Math.round((maskBox.w / 100) * playW);
-          const mh = Math.round((maskBox.h / 100) * playH);
-          vfFilter = `drawbox=x=${mx}:y=${my}:w=${mw}:h=${mh}:color=black@0.85:t=fill,ass=` + assEsc;
-          console.log(`[render ${id}] Using custom maskBox: x=${mx} y=${my} w=${mw} h=${mh}`);
-        } else {
-          // Auto-detect: cobre a parte inferior do vídeo onde normalmente ficam legendas
-          // Usa drawbox preto semi-transparente + blur leve para não ficar tão artificial
-          const maskY = Math.round(playH * 0.78);
-          const maskH = Math.round(playH * 0.22);
-          vfFilter = `drawbox=x=0:y=${maskY}:w=${playW}:h=${maskH}:color=black@0.75:t=fill,ass=` + assEsc;
-          console.log(`[render ${id}] Using auto bottom mask: y=${maskY} h=${maskH}`);
-        }
+        // Filtro ASS simples — sem drawbox, sem complicação
+        const vfString = `ass=${assPath}`;
+        console.log(`[render ${id}] Video filter: ${vfString}`);
 
         await new Promise<void>((resolve, reject) => {
           ffmpeg(inputPath)
-            .videoFilters(vfFilter)
             .outputOptions([
-              '-c:v libx264',
-              '-preset ultrafast',
-              '-crf 23',
-              '-threads 1',
-              '-tune fastdecode',
-              '-c:a copy',
+              '-c:v', 'libx264',
+              '-preset', 'ultrafast',
+              '-crf', '23',
+              '-threads', '1',
+              '-tune', 'fastdecode',
+              '-vf', vfString,
+              '-c:a', 'copy',
               '-sn',
-              '-movflags +faststart',
-              '-f mp4',
+              '-movflags', '+faststart',
+              '-f', 'mp4',
             ])
             .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd))
             .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
@@ -423,7 +382,6 @@ async function startServer() {
     if (!job || job.status !== 'done' || !job.outputPath) {
       return res.status(404).json({ error: 'File not ready' });
     }
-    // Anti-cache: garante que o navegador sempre baixe o arquivo novo
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
