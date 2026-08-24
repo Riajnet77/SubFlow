@@ -302,13 +302,6 @@ async function startServer() {
     // DIAGNÓSTICO
     const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
     console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
-    console.log(`[render ${id}] Style preset=${style.preset} targetLang=${style.targetLang || 'none'}`);
-    if (style.targetLang && style.targetLang !== 'original' && style.targetLang !== 'en') {
-      const isProbablyEnglish = sampleTexts.every((t: string) => /^[a-zA-Z0-9\s.,!?;:'"-]+$/.test(t));
-      if (isProbablyEnglish) {
-        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English`);
-      }
-    }
 
     const inputPath = req.file.path;
     const assPath = `/tmp/${id}.ass`;
@@ -332,30 +325,44 @@ async function startServer() {
         console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
         dialogueLines.slice(0, 3).forEach((line: string, i: number) => console.log(`  ${i+1}. ${line}`));
 
-        // Filtro ASS simples — sem drawbox, sem complicação
-        const vfString = `ass=${assPath}`;
-        console.log(`[render ${id}] Video filter: ${vfString}`);
+        // Chama FFmpeg diretamente via spawn — fluent-ffmpeg não passa -vf corretamente
+        const { spawn } = require('child_process');
+        const ffmpegArgs = [
+          '-i', inputPath,
+          '-y',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', '23',
+          '-threads', '1',
+          '-tune', 'fastdecode',
+          '-vf', `ass=${assPath}`,
+          '-c:a', 'copy',
+          '-sn',
+          '-movflags', '+faststart',
+          '-f', 'mp4',
+          outputPath
+        ];
+        console.log(`[render ${id}] ffmpeg args:`, ffmpegArgs.join(' '));
 
         await new Promise<void>((resolve, reject) => {
-          ffmpeg(inputPath)
-            .outputOptions([
-              '-c:v', 'libx264',
-              '-preset', 'ultrafast',
-              '-crf', '23',
-              '-threads', '1',
-              '-tune', 'fastdecode',
-              '-vf', vfString,
-              '-c:a', 'copy',
-              '-sn',
-              '-movflags', '+faststart',
-              '-f', 'mp4',
-            ])
-            .on('start', cmd => console.log(`[render ${id}] ffmpeg cmd:`, cmd))
-            .on('progress', p => console.log(`[render ${id}] progress: ${p.percent?.toFixed(1)}%`))
-            .on('end', () => { console.log(`[render ${id}] Done`); resolve(); })
-            .on('stderr', line => { if (line.includes('font') || line.includes('bold') || line.includes('warn')) console.log(`[render stderr]`, line); })
-            .on('error', reject)
-            .save(outputPath);
+          const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+          let stderr = '';
+          proc.stderr.on('data', (data: Buffer) => { 
+            const line = data.toString();
+            stderr += line;
+            if (line.includes('font') || line.includes('bold') || line.includes('warn') || line.includes('error') || line.includes('ass')) {
+              console.log(`[render stderr]`, line.trim());
+            }
+          });
+          proc.on('close', (code: number) => {
+            if (code === 0) {
+              console.log(`[render ${id}] Done`);
+              resolve();
+            } else {
+              reject(new Error(`ffmpeg exited with code ${code}. stderr: ${stderr.slice(-500)}`));
+            }
+          });
+          proc.on('error', reject);
         });
 
         jobs.set(id, { status: 'done', outputPath });
