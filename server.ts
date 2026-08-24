@@ -341,6 +341,20 @@ async function startServer() {
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
         
         // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
+        // Obtém dimensões do vídeo para calcular a máscara corretamente
+        let playW = 1280, playH = 720;
+        try {
+          const ffprobeOut = require('child_process').execSync(
+            `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${inputPath}"`,
+            { encoding: 'utf8', timeout: 10000 }
+          ).trim();
+          const [w, h] = ffprobeOut.split('x').map(Number);
+          if (w && h) { playW = w; playH = h; }
+        } catch(e) {
+          console.warn(`[render ${id}] ffprobe failed, using default 1280x720`);
+        }
+        console.log(`[render ${id}] Video dimensions: ${playW}x${playH}`);
+
         // Se o vídeo original tem legendas queimadas (hardcoded), cobre a área com blur/caixa
         // antes de desenhar as legendas novas
         const maskBox = style.maskBox; // {x%, y%, w%, h%} ou undefined
