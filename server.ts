@@ -299,6 +299,20 @@ async function startServer() {
     const subtitles: any[] = JSON.parse(req.body.subtitles);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
+
+    // DIAGNÓSTICO: Loga os primeiros subtítulos recebidos para confirmar idioma
+    const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
+    console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
+    console.log(`[render ${id}] Style preset=${style.preset} targetLang=${style.targetLang || 'none'}`);
+
+    // Validação: se o style indica tradução mas os subtítulos parecem em inglês, loga alerta
+    if (style.targetLang && style.targetLang !== 'original' && style.targetLang !== 'en') {
+      const isProbablyEnglish = sampleTexts.every((t: string) => /^[a-zA-Z0-9\s.,!?;:'"-]+$/.test(t));
+      if (isProbablyEnglish) {
+        console.warn(`[render ${id}] WARNING: targetLang=${style.targetLang} but subtitles appear to be in English. Frontend may be sending original subtitles instead of translated ones.`);
+      }
+    }
+
     const inputPath = req.file.path;
     const assPath = `/tmp/${id}.ass`;
     const outputPath = `/tmp/${id}_output.mp4`;
@@ -312,9 +326,18 @@ async function startServer() {
         console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
         
         const assContent = buildAss(subtitles, style);
-        // Escreve .ass com BOM UTF-8 para libass reconhecer acentos corretamente
-    fs.writeFileSync(assPath, '﻿' + assContent, 'utf8');
-    console.log(`[render ${id}] ASS file written. First 200 chars:`, assContent.slice(0, 200));
+        // Escreve .ass em UTF-8 puro (libass moderno detecta UTF-8 automaticamente)
+    fs.writeFileSync(assPath, assContent, 'utf8');
+
+    // DEBUG: Salva cópia do .ass para inspeção manual
+    const debugAssPath = `/tmp/${id}_debug.ass`;
+    fs.writeFileSync(debugAssPath, assContent, 'utf8');
+    console.log(`[render ${id}] ASS debug saved to: ${debugAssPath}`);
+
+    // Loga os primeiros 3 dialogues para confirmar idioma no .ass
+    const dialogueLines = assContent.split('\n').filter(line => line.startsWith('Dialogue:'));
+    console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
+    dialogueLines.slice(0, 3).forEach((line, i) => console.log(`  ${i+1}. ${line}`));
         const assEsc = assPath.replace(/\\/g,"/").replace(/^([A-Za-z]):/,"$1\\:");
         
         // CORREÇÃO 5: Sem aspas no caminho para não crashar o FFmpeg
@@ -365,7 +388,12 @@ async function startServer() {
     if (!job || job.status !== 'done' || !job.outputPath) {
       return res.status(404).json({ error: 'File not ready' });
     }
-    res.download(job.outputPath, 'subflow_export.mp4', err => {
+    // Anti-cache: garante que o navegador sempre baixe o arquivo novo
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    res.download(job.outputPath, `subflow_export_${Date.now()}.mp4`, err => {
       if (err) console.error(`[render ${req.params.id}] download error:`, err);
       try { fs.unlinkSync(job.outputPath!); } catch {}
       jobs.delete(req.params.id);
