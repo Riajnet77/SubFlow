@@ -141,14 +141,6 @@ function buildAss(subtitles: any[], style: any): string {
     'Courier New': 'COUR',
   };
   const fontName = FONT_MAP[rawFontName] || rawFontName;
-
-  // Fallback: se houver acentos e fonte for Impact, usa Arial (melhor suporte Linux)
-  const hasAccentedChars = subtitles.some((s: any) => /[^\x00-\x7F]/.test(s.text));
-  const finalFontName = (hasAccentedChars && fontName === 'IMPACT') ? 'ARIAL' : fontName;
-  if (hasAccentedChars && fontName === 'IMPACT') {
-    console.warn(`[buildAss] Detected accented chars, switching font from IMPACT to ARIAL`);
-  }
-
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
   const secondaryAss = hexToAss('#FFFFFF', 0);
@@ -172,7 +164,9 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'bold' ? 3
     : 2;
 
-  const borderStyle = bgOpacity > 0 ? 3 : 1;
+  // BorderStyle=3 = fundo opaco por trás do texto (cobre legendas queimadas do vídeo original)
+  const borderStyle = 3;
+  const backColourFinal = hexToAss('#000000', 0.6);
 
   const marginL = Math.round((box.x / 100) * playW);
   const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
@@ -195,7 +189,7 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${finalFontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColour},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColourFinal},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -298,11 +292,6 @@ async function startServer() {
     const subtitles: any[] = JSON.parse(req.body.subtitles);
     const style = req.body.style ? JSON.parse(req.body.style) : {};
     const id = uuidv4();
-
-    // DIAGNÓSTICO
-    const sampleTexts = subtitles.slice(0, 3).map((s: any) => s.text);
-    console.log(`[render ${id}] Received ${subtitles.length} subtitles. Samples:`, sampleTexts);
-
     const inputPath = req.file.path;
     const assPath = `/tmp/${id}.ass`;
     const outputPath = `/tmp/${id}_output.mp4`;
@@ -325,8 +314,14 @@ async function startServer() {
         console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
         dialogueLines.slice(0, 3).forEach((line: string, i: number) => console.log(`  ${i+1}. ${line}`));
 
-        // Chama FFmpeg diretamente via spawn — fluent-ffmpeg ignora/perde argumentos
+        // Chama FFmpeg diretamente via spawn — USA ffmpeg-linux do projeto
         const { spawn } = require('child_process');
+
+        // Usa ffmpeg-linux moderno do projeto se existir, senão fallback pro ffmpeg do sistema
+        const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+        const ffmpegBinary = fs.existsSync(modernFfmpegPath) ? modernFfmpegPath : 'ffmpeg';
+        console.log(`[render ${id}] Using FFmpeg binary: ${ffmpegBinary}`);
+
         const ffmpegArgs = [
           '-y',
           '-i', inputPath,
@@ -345,7 +340,7 @@ async function startServer() {
         console.log(`[render ${id}] ffmpeg args:`, ffmpegArgs.join(' '));
 
         await new Promise<void>((resolve, reject) => {
-          const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+          const proc = spawn(ffmpegBinary, ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
           let stderr = '';
           proc.stderr.on('data', (data: Buffer) => { 
             const line = data.toString();
