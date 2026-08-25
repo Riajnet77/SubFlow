@@ -1,811 +1,755 @@
-import { useState, useRef, useCallback, useEffect, DragEvent } from "react";
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import cors from 'cors';
+import multer from 'multer';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import fs from 'fs';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import Groq from 'groq-sdk';
 
-interface Subtitle { start: number; end: number; text: string; confidence: number; }
-interface SubBox { x: number; y: number; w: number; h: number; }
-interface SubStyle {
-  fontSize: number; fontName: string;
-  primaryColor: string; outlineColor: string;
-  bgOpacity: number; preset: string; box: SubBox;
-}
-interface CustomPreset extends Partial<SubStyle> { label: string; emoji: string; }
-type Step = "upload" | "processing" | "edit" | "export";
-
-const LANGUAGES = [
-  { code: "original", label: "Original (no translation)" },
-  { code: "en", label: "🇺🇸 English" },
-  { code: "pt", label: "🇧🇷 Portuguese" },
-  { code: "es", label: "🇪🇸 Spanish" },
-  { code: "fr", label: "🇫🇷 French" },
-  { code: "de", label: "🇩🇪 German" },
-  { code: "it", label: "🇮🇹 Italian" },
-  { code: "ja", label: "🇯🇵 Japanese" },
-  { code: "ko", label: "🇰🇷 Korean" },
-  { code: "zh", label: "🇨🇳 Chinese" },
-  { code: "ru", label: "🇷🇺 Russian" },
-  { code: "ar", label: "🇸🇦 Arabic" },
-  { code: "hi", label: "🇮🇳 Hindi" },
-  { code: "nl", label: "🇳🇱 Dutch" },
-  { code: "pl", label: "🇵🇱 Polish" },
-  { code: "tr", label: "🇹🇷 Turkish" },
-  { code: "sv", label: "🇸🇪 Swedish" },
-  { code: "da", label: "🇩🇰 Danish" },
-  { code: "fi", label: "🇫🇮 Finnish" },
-  { code: "no", label: "🇳🇴 Norwegian" },
-  { code: "uk", label: "🇺🇦 Ukrainian" },
-  { code: "he", label: "🇮🇱 Hebrew" },
-  { code: "th", label: "🇹🇭 Thai" },
-  { code: "vi", label: "🇻🇳 Vietnamese" },
-  { code: "id", label: "🇮🇩 Indonesian" },
-  { code: "ms", label: "🇲🇾 Malay" },
-  { code: "ro", label: "🇷🇴 Romanian" },
-  { code: "hu", label: "🇭🇺 Hungarian" },
-  { code: "cs", label: "🇨🇿 Czech" },
-  { code: "el", label: "🇬🇷 Greek" },
-];
-const FONTS = ["Arial", "Impact", "Georgia", "Verdana", "Trebuchet MS", "Tahoma", "Courier New"];
-const PRESETS: Record<string, Partial<SubStyle>> = {
-  impact:  { fontName: "Impact",      fontSize: 26, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  bold:    { fontName: "Impact",      fontSize: 30, primaryColor: "#FFFF00", outlineColor: "#000000", bgOpacity: 0 },
-  neon:    { fontName: "Arial",       fontSize: 22, primaryColor: "#00FFFF", outlineColor: "#0055FF", bgOpacity: 0 },
-  fire:    { fontName: "Impact",      fontSize: 26, primaryColor: "#FF4500", outlineColor: "#FFD700", bgOpacity: 0 },
-  ice:     { fontName: "Arial",       fontSize: 20, primaryColor: "#E0F7FF", outlineColor: "#0099CC", bgOpacity: 0.25 },
-  cinema:  { fontName: "Georgia",     fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.75 },
-  minimal: { fontName: "Arial",       fontSize: 16, primaryColor: "#FFFFFF", outlineColor: "#222222", bgOpacity: 0 },
-  classic: { fontName: "Arial",       fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.55 },
-  karaoke: { fontName: "Impact",      fontSize: 28, primaryColor: "#FFFF00", outlineColor: "#FF6600", bgOpacity: 0 },
-  shadow:  { fontName: "Impact",      fontSize: 26, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  pink:    { fontName: "Arial",       fontSize: 22, primaryColor: "#FF69B4", outlineColor: "#880033", bgOpacity: 0 },
-  matrix:  { fontName: "Courier New", fontSize: 18, primaryColor: "#00FF00", outlineColor: "#003300", bgOpacity: 0 },
-  retro:   { fontName: "Impact",      fontSize: 24, primaryColor: "#FFA500", outlineColor: "#8B4513", bgOpacity: 0 },
-  elegant: { fontName: "Georgia",     fontSize: 20, primaryColor: "#FFD700", outlineColor: "#8B6914", bgOpacity: 0 },
-  purple:  { fontName: "Impact",      fontSize: 24, primaryColor: "#CC99FF", outlineColor: "#330066", bgOpacity: 0 },
-  green:   { fontName: "Arial",       fontSize: 20, primaryColor: "#00FF88", outlineColor: "#006633", bgOpacity: 0 },
-  darkbox: { fontName: "Arial",       fontSize: 18, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0.85 },
-  // Professional-standard whitebox: bold + larger text (readable at a glance on
-  // mobile), fully opaque background (was 0.9 — looked washed-out against bright sky).
-  whitebox:{ fontName: "Arial",       fontSize: 30, primaryColor: "#000000", outlineColor: "#FFFFFF", bgOpacity: 1 },
-  reels:   { fontName: "Impact",      fontSize: 28, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  // FIX: outlineColor used to be "#FFFFFF" (same as primaryColor) — white text with a
-  // white outline and no shadow (see SubtitleBox) meant emphasis text vanished on any
-  // light part of the video. Outline is now black so the text always has contrast.
-  emphasis:{ fontName: "Arial",       fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  // Distinct signature looks — not just font swaps of existing presets.
-  viral:   { fontName: "Impact",       fontSize: 34, primaryColor: "#FFE500", outlineColor: "#000000", bgOpacity: 0 },
-  clean:   { fontName: "Trebuchet MS", fontSize: 22, primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0 },
-  podcast: { fontName: "Verdana",      fontSize: 24, primaryColor: "#00E5FF", outlineColor: "#000000", bgOpacity: 0.75 },
-};
-const PRESET_LIST = [
-  { key: "impact",   label: "Impact",    emoji: "💥" }, { key: "bold",    label: "Bold",     emoji: "⚡" },
-  { key: "neon",     label: "Neon",      emoji: "🌀" }, { key: "fire",    label: "Fire",     emoji: "🔥" },
-  { key: "ice",      label: "Ice",       emoji: "❄️" }, { key: "cinema",  label: "Cinema",   emoji: "🎬" },
-  { key: "classic",  label: "Classic",   emoji: "📺" }, { key: "minimal", label: "Minimal",  emoji: "◻️" },
-  { key: "karaoke",  label: "Karaoke",   emoji: "🎤" }, { key: "shadow",  label: "Shadow",   emoji: "🌑" },
-  { key: "pink",     label: "Pink",      emoji: "🩷" }, { key: "matrix",  label: "Matrix",   emoji: "💻" },
-  { key: "retro",    label: "Retro",     emoji: "📼" }, { key: "elegant", label: "Elegant",  emoji: "✨" },
-  { key: "purple",   label: "Purple",    emoji: "🟣" }, { key: "green",   label: "Green",    emoji: "💚" },
-  { key: "darkbox",  label: "Dark Box",  emoji: "⬛" }, { key: "whitebox",label: "White Box",emoji: "⬜" },
-  { key: "reels",    label: "Reels",     emoji: "🎞️" },
-  { key: "emphasis", label: "Emphasis",  emoji: "✨" },
-  { key: "viral",    label: "Viral",     emoji: "🚀" },
-  { key: "clean",    label: "Clean",     emoji: "🤍" },
-  { key: "podcast",  label: "Podcast",   emoji: "🎙️" },
-];
-const DEFAULT_BOX: SubBox = { x: 5, y: 78, w: 90, h: 14 };
-const DEFAULT_STYLE: SubStyle = { fontSize: 26, fontName: "Impact", primaryColor: "#FFFFFF", outlineColor: "#000000", bgOpacity: 0, preset: "impact", box: DEFAULT_BOX };
-const CUSTOM_PRESETS_KEY = "subflow-custom-presets";
-
-function toTimecode(s: number) {
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60), ms = Math.round((s % 1) * 1000);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
-}
-function formatSize(b: number) { return b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`; }
-
-// ─── SubtitleBox ──────────────────────────────────────────────────────────────
-function SubtitleBox({ text, style, onChange, fontScale }: {
-  text: string; style: SubStyle; onChange: (s: SubStyle) => void; fontScale: number;
-}) {
-  const [sel, setSel] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ type: string; sx: number; sy: number; sb: SubBox } | null>(null);
-
-  useEffect(() => {
-    const fn = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setSel(false); };
-    document.addEventListener("mousedown", fn);
-    return () => document.removeEventListener("mousedown", fn);
-  }, []);
-
-  const psize = () => { const p = ref.current?.parentElement; return p ? { w: p.clientWidth, h: p.clientHeight } : { w: 1, h: 1 }; };
-  const clamp = (b: SubBox): SubBox => ({
-    x: Math.max(0, Math.min(100 - b.w, b.x)), y: Math.max(0, Math.min(100 - b.h, b.y)),
-    w: Math.max(8, Math.min(100, b.w)), h: Math.max(4, Math.min(50, b.h)),
-  });
-  const pd = (e: React.PointerEvent, type: string) => {
-    e.stopPropagation(); e.preventDefault(); setSel(true);
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    drag.current = { type, sx: e.clientX, sy: e.clientY, sb: { ...style.box } };
-  };
-  const pm = (e: React.PointerEvent) => {
-    if (!drag.current) return;
-    const { type, sx, sy, sb } = drag.current;
-    const { w: pw, h: ph } = psize();
-    const dx = ((e.clientX - sx) / pw) * 100, dy = ((e.clientY - sy) / ph) * 100;
-    let nb = { ...sb };
-    if (type === "move") { nb.x = sb.x + dx; nb.y = sb.y + dy; }
-    if (type === "se") { nb.w = sb.w + dx; nb.h = sb.h + dy; }
-    if (type === "sw") { nb.x = sb.x + dx; nb.w = sb.w - dx; nb.h = sb.h + dy; }
-    if (type === "ne") { nb.y = sb.y + dy; nb.w = sb.w + dx; nb.h = sb.h - dy; }
-    if (type === "nw") { nb.x = sb.x + dx; nb.y = sb.y + dy; nb.w = sb.w - dx; nb.h = sb.h - dy; }
-    if (type === "n") { nb.y = sb.y + dy; nb.h = sb.h - dy; }
-    if (type === "s") { nb.h = sb.h + dy; }
-    if (type === "e") { nb.w = sb.w + dx; }
-    if (type === "w") { nb.x = sb.x + dx; nb.w = sb.w - dx; }
-    onChange({ ...style, box: clamp(nb) }); // preserve preset when moving box
-  };
-  const pu = () => { drag.current = null; };
-
-  const fs = Math.max(8, Math.round(style.fontSize * fontScale));
-  // 'clean' uses a real blurred drop shadow (soft, no visible outline) — a different
-  // technique from the hard 4-direction pseudo-outline every other preset uses, so it
-  // actually reads as a distinct "soft" look rather than a font swap of another preset.
-  const ts = style.preset === 'clean'
-    ? '0px 3px 10px rgba(0,0,0,0.55)'
-    : style.bgOpacity === 0
-    ? `1px 1px 3px ${style.outlineColor},-1px -1px 3px ${style.outlineColor},1px -1px 3px ${style.outlineColor},-1px 1px 3px ${style.outlineColor}`
-    : "none";
-
-  // FIX: this used to be hardcoded to black (`rgba(0,0,0,...)`) no matter the preset,
-  // so the "White Box" preset always showed a black box in the preview even though the
-  // exported video correctly used white (server.ts picks the color from style.preset).
-  // Now the preview matches what actually gets burned into the exported video.
-  const boxBg = style.bgOpacity > 0
-    ? (style.preset === "whitebox" ? `rgba(255,255,255,${style.bgOpacity})` : `rgba(0,0,0,${style.bgOpacity})`)
-    : "transparent";
-
-  const HANDLES = [
-    { k: "nw", s: { top: -5, left: -5, cursor: "nw-resize" } },
-    { k: "ne", s: { top: -5, right: -5, cursor: "ne-resize" } },
-    { k: "sw", s: { bottom: -5, left: -5, cursor: "sw-resize" } },
-    { k: "se", s: { bottom: -5, right: -5, cursor: "se-resize" } },
-    { k: "n",  s: { top: -5, left: "50%", transform: "translateX(-50%)", cursor: "n-resize" } },
-    { k: "s",  s: { bottom: -5, left: "50%", transform: "translateX(-50%)", cursor: "s-resize" } },
-    { k: "e",  s: { right: -5, top: "50%", transform: "translateY(-50%)", cursor: "e-resize" } },
-    { k: "w",  s: { left: -5, top: "50%", transform: "translateY(-50%)", cursor: "w-resize" } },
-  ] as const;
-
-  return (
-    <div ref={ref}
-      style={{
-        position: "absolute", left: `${style.box.x}%`, top: `${style.box.y}%`,
-        width: `${style.box.w}%`, height: `${style.box.h}%`,
-        border: sel ? "2px solid #f59e0b" : "1.5px dashed rgba(255,255,255,0.5)",
-        borderRadius: 4, zIndex: 20, cursor: "move",
-        background: sel ? "rgba(245,158,11,0.06)" : "transparent",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        boxSizing: "border-box", overflow: "visible",
-      }}
-      onPointerDown={e => pd(e, "move")} onPointerMove={pm} onPointerUp={pu}
-    >
-      {text && (
-        text.includes('**') ? (
-          <span style={{
-            fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
-            background: boxBg,
-            padding: style.bgOpacity > 0 ? "6px 16px" : "0", borderRadius: style.bgOpacity > 0 ? "8px" : "0",
-            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
-            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
-          }}>
-            {text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
-              part.startsWith('**') && part.endsWith('**')
-                ? <strong key={i} style={{ fontSize: Math.round(fs * 2.4) + "px", fontWeight: 900, letterSpacing: '-0.03em', fontFamily: style.fontName, lineHeight: 1 }}>{part.slice(2, -2)}</strong>
-                : <span key={i} style={{ fontWeight: 300, fontSize: Math.round(fs * 0.8) + "px" }}>{part}</span>
-            )}
-          </span>
-        ) : (
-          <span style={{
-            fontFamily: style.fontName, fontSize: fs + "px", color: style.primaryColor, textShadow: ts,
-            background: boxBg,
-            padding: style.bgOpacity > 0 ? "6px 16px" : "0", borderRadius: style.bgOpacity > 0 ? "8px" : "0",
-            textAlign: "center", lineHeight: 1.2, maxWidth: "98%", wordBreak: "break-word",
-            whiteSpace: "normal", display: "block", pointerEvents: "none", userSelect: "none",
-            textTransform: style.preset === 'viral' ? 'uppercase' : 'none',
-          }}>{text}</span>
-        )
-      )}
-      {!text && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", pointerEvents: "none", userSelect: "none", fontFamily: "monospace" }}>subtitle area</span>}
-      {sel && HANDLES.map(h => (
-        <div key={h.k}
-          style={{ position: "absolute", width: 10, height: 10, background: "#f59e0b", border: "1.5px solid #fff", borderRadius: 2, zIndex: 30, ...h.s as any }}
-          onPointerDown={e => pd(e, h.k)} onPointerMove={pm} onPointerUp={pu} />
-      ))}
-      {sel && <div style={{ position: "absolute", top: -20, right: 0, fontSize: 9, color: "rgba(255,255,255,0.7)", background: "rgba(0,0,0,0.65)", padding: "2px 5px", borderRadius: 3, pointerEvents: "none", whiteSpace: "nowrap" }}>click outside to deselect</div>}
-    </div>
-  );
+// Use modern FFmpeg binary committed to repo if available.
+const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+console.log('[ffmpeg] cwd:', process.cwd());
+console.log('[ffmpeg] ffmpeg-linux exists:', fs.existsSync(modernFfmpegPath));
+console.log('[ffmpeg] path:', modernFfmpegPath);
+if (fs.existsSync(modernFfmpegPath)) {
+  fs.chmodSync(modernFfmpegPath, '755');
+  ffmpeg.setFfmpegPath(modernFfmpegPath);
+  console.log('[ffmpeg] Using modern ffmpeg-linux binary');
+} else {
+  ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+  console.log('[ffmpeg] Using npm ffmpeg (2018 fallback)');
 }
 
-function UploadZone({ onFile }: { onFile: (f: File) => void }) {
-  const [drag, setDrag] = useState(false);
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <div className={`upload-zone ${drag ? "active" : ""}`}
-      onDragOver={e => { e.preventDefault(); setDrag(true); }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={(e: DragEvent<HTMLDivElement>) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
-      onClick={() => ref.current?.click()}>
-      <input ref={ref} type="file" accept="video/*" style={{ display: "none" }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
-      <div className="upload-icon"><svg viewBox="0 0 48 48" fill="none"><rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" strokeWidth="2" /><path d="M20 20L28 24L20 28V20Z" fill="currentColor" /><path d="M4 16H44" stroke="currentColor" strokeWidth="2" /><circle cx="9" cy="12" r="1.5" fill="currentColor" /><circle cx="14" cy="12" r="1.5" fill="currentColor" /><circle cx="19" cy="12" r="1.5" fill="currentColor" /></svg></div>
-      <p className="upload-title">Drop your video here</p>
-      <p className="upload-sub">MP4, MOV, MKV, AVI, WebM — up to 10 min · 150 MB</p>
-      <button type="button" className="btn-outline" onClick={e => { e.stopPropagation(); ref.current?.click(); }}>Browse files</button>
-    </div>
-  );
+// Groq client
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// Copy fonts to ~/.fonts
+const fontsDir = path.join(process.cwd(), '_fonts');
+if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir);
+const homeFontsDir = path.join(process.env.HOME || '/root', '.fonts');
+if (!fs.existsSync(homeFontsDir)) fs.mkdirSync(homeFontsDir, { recursive: true });
+
+// CORREÇÃO 1: Busca fontes dinamicamente e remove números do nome
+const rootFiles = fs.readdirSync(process.cwd()).filter(f => f.toUpperCase().endsWith('.TTF'));
+for (const f of rootFiles) {
+  const src = path.join(process.cwd(), f);
+  const cleanName = f.replace(/^\d+_/, '');
+  fs.copyFileSync(src, path.join(fontsDir, cleanName));
+  fs.copyFileSync(src, path.join(homeFontsDir, cleanName));
+}
+try { require('child_process').execSync('fc-cache -f ' + homeFontsDir, { timeout: 10000 }); } catch(e) {}
+console.log('[fonts] Ready in', homeFontsDir);
+
+const upload = multer({
+  dest: '/tmp/uploads/',
+  limits: { fileSize: 150 * 1024 * 1024 },
+});
+
+function formatSrtTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.round((seconds % 1) * 1000);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
-function ProcessingView({ fileName }: { fileName: string }) {
-  const [dots, setDots] = useState(".");
-  useEffect(() => { const id = setInterval(() => setDots(d => d.length >= 3 ? "." : d + "."), 600); return () => clearInterval(id); }, []);
-  return (
-    <div className="processing-view">
-      <div className="spinner-wrap">
-        <svg viewBox="0 0 50 50" className="spinner-ring"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="94 32" strokeLinecap="round" /></svg>
-        <svg className="spinner-icon" viewBox="0 0 24 24" fill="none"><path d="M9 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4M9 7V5a2 2 0 014 0v2M9 7h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-      </div>
-      <p className="proc-title">Transcribing{dots}</p>
-      <p className="proc-file">{fileName}</p>
-      <div className="proc-steps">
-        <span className="sbadge active">Extracting audio</span>
-        <span className="sbadge">Whisper AI</span>
-        <span className="sbadge">Translating</span>
-      </div>
-    </div>
-  );
+function buildSrt(subtitles: any[]): string {
+  return subtitles
+    .map((sub, i) => `${i + 1}\n${formatSrtTime(sub.start)} --> ${formatSrtTime(sub.end)}\n${sub.text}\n`)
+    .join('\n');
 }
 
-function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, customPresets, onSaveCustomPreset, onDeleteCustomPreset, onReset, stripEmphasisTags }: {
-  style: SubStyle; onChange: (s: SubStyle) => void;
-  subtitles: Subtitle[]; onSubChange: (s: Subtitle[]) => void;
-  currentTime: number;
-  customPresets: Record<string, CustomPreset>;
-  onSaveCustomPreset: (name: string) => void;
-  onDeleteCustomPreset: (key: string) => void;
-  onReset: () => void;
-  stripEmphasisTags: (subs: Subtitle[]) => Subtitle[];
-}) {
-  const [tab, setTab] = useState<"style" | "subs">("style");
-  const set = (p: Partial<SubStyle>) => {
-    // Only reset preset to 'custom' when visual identity changes (color, font, background)
-    // Preserve preset for size-only or position-only changes
-    const visualKeys = ['primaryColor', 'outlineColor', 'bgOpacity', 'fontName'];
-    const changesVisual = Object.keys(p).some(k => visualKeys.includes(k));
-    onChange({ ...style, ...p, preset: changesVisual ? "custom" : style.preset });
-  };
-  const applyPreset = (k: string) => {
-    const preset = PRESETS[k] ?? customPresets[k];
-    if (!preset) return;
-    // Strip emphasis tags when switching away from emphasis preset
-    if (style.preset === 'emphasis' && k !== 'emphasis') {
-      onSubChange(stripEmphasisTags(subtitles));
+async function applyEmphasis(subtitles: any[], groq: any): Promise<any[]> {
+  try {
+    const texts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+    const chat = await groq.chat.completions.create({
+      // CORREÇÃO 2: Modelo correto da Groq
+      model: 'openai/gpt-oss-120b',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a subtitle emphasis editor. For each subtitle line, identify the 1-2 most important words (nouns, verbs, key adjectives) and wrap them in **double asterisks**.
+Keep ALL other words exactly as-is. Return the same numbered format.
+Example:
+Input:  1|||you need to find the demand
+Output: 1|||you need to find the **demand**
+Input:  2|||where people are looking for answers
+Output: 2|||where people are looking for **answers**
+Return ONLY the numbered lines, nothing else.`,
+        },
+        { role: 'user', content: texts },
+      ],
+      temperature: 0.1,
+      max_tokens: 4096,
+    });
+
+    const raw = chat.choices[0]?.message?.content ?? '';
+    const emphasisMap = new Map<number, string>();
+    for (const line of raw.split('\n')) {
+      const match = line.match(/^(\d+)\|\|\|(.+)$/);
+      if (match) emphasisMap.set(parseInt(match[1]), match[2].trim());
     }
-    onChange({ ...style, ...preset, preset: k });
-    // When selecting emphasis, apply AI word emphasis to subtitles
-    if (k === 'emphasis' && subtitles.length > 0) {
-      fetch('/api/emphasis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subtitles: stripEmphasisTags(subtitles) }),
+
+    return subtitles.map((s, i) => ({
+      ...s,
+      text: emphasisMap.get(i + 1) ?? s.text,
+    }));
+  } catch (e) {
+    console.warn('[emphasis] Failed, keeping original:', e);
+    return subtitles;
+  }
+}
+
+function buildAss(subtitles: any[], style: any): string {
+  const {
+    fontName: rawFontName = 'Arial',
+    fontSize = 26,
+    primaryColor = '#FFFFFF',
+    outlineColor = '#000000',
+    bgOpacity = 0,
+    box = { x: 5, y: 78, w: 90, h: 14 },
+    browserH = 720,
+    nativeW = 0,
+    nativeH = 0,
+  } = style;
+
+  const playW = nativeW || 1280;
+  const playH = nativeH || 720;
+
+  const REF_H = 1080;
+  const scaledFontSize = Math.max(8, Math.round(fontSize * (playH / REF_H)));
+
+  const hexToAss = (hex: string, alpha = 0): string => {
+    const c = hex.replace('#', '').padEnd(6, '0');
+    const r = c.slice(0, 2);
+    const g = c.slice(2, 4);
+    const b = c.slice(4, 6);
+    const a = Math.round(alpha * 255).toString(16).padStart(2, '0').toUpperCase();
+    return `&H${a}${b}${g}${r}`.toUpperCase();
+  };
+
+  const FONT_MAP: Record<string, string> = {
+    'Impact': 'IMPACT',
+    'Arial': 'ARIAL',
+    'Georgia': 'GEORGIA',
+    'Verdana': 'VERDANA',
+    'Trebuchet MS': 'TREBUC',
+    'Tahoma': 'TAHOMA',
+    'Courier New': 'COUR',
+  };
+  const fontName = FONT_MAP[rawFontName] || rawFontName;
+  const primaryAss = hexToAss(primaryColor, 0);
+  const outlineAss = hexToAss(outlineColor, 0);
+  const secondaryAss = hexToAss('#FFFFFF', 0);
+
+  // FIX: antes o fundo do texto (usado pelos presets "com caixa", ex. cinema/darkbox/
+  // whitebox/classic/podcast) ignorava o valor de bgOpacity escolhido pelo usuário e
+  // sempre usava 0.6 fixo. Agora respeita o slider quando bgOpacity > 0.
+  const backColourFinal = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 0.6);
+
+  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','viral','podcast'];
+  const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
+
+  const shadowDepth = bgOpacity > 0 ? 3
+    : style.preset === 'shadow' ? 3
+    : style.preset === 'clean' ? 4
+    : style.preset === 'matrix' ? 2
+    : style.preset === 'neon' ? 0
+    : 0;
+
+  const outlineWidth = bgOpacity > 0 ? 10  
+    : style.preset === 'minimal' ? 1
+    : style.preset === 'clean' ? 0.5   
+    : style.preset === 'viral' ? 4     
+    : style.preset === 'neon' ? 3
+    : style.preset === 'bold' ? 3
+    : 2;
+
+  // FIX PRINCIPAL: antes, a cobertura de legendas queimadas do vídeo original
+  // dependia inteiramente do BorderStyle=3 (caixa "colada" ao texto, cujo padding é
+  // o próprio Outline). Isso funciona OK quando bgOpacity>0, mas para os presets sem
+  // fundo (impact, minimal, clean, etc — a maioria) o padding é de 1-4px: se a legenda
+  // original for mais larga/alta que o texto traduzido (comum, já que o comprimento
+  // muda entre idiomas), sobras da legenda original continuam visíveis, dando a
+  // impressão de que a tradução "não aparece" no vídeo exportado.
+  //
+  // A partir de agora, SEMPRE desenhamos um retângulo opaco fixo cobrindo toda a área
+  // da caixa de legenda definida pelo usuário (box.x/y/w/h), num layer abaixo do texto.
+  // Isso garante cobertura total independente do preset ou do tamanho da tradução.
+  // BorderStyle volta a ser 1 (contorno normal, sem caixa extra) quando bgOpacity=0,
+  // já que a cobertura de baixo já resolve isso — o texto fica limpo, como o preset
+  // originalmente prometia.
+  const borderStyle = bgOpacity > 0 ? 3 : 1;
+
+  const marginL = Math.round((box.x / 100) * playW);
+  const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
+  const marginV = Math.round(((100 - box.y - box.h) / 100) * playH);
+  const alignment = 2;
+
+  const assTime = (s: number): string => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = (s % 60).toFixed(2).padStart(5, '0');
+    return `${h}:${String(m).padStart(2, '0')}:${sec}`;
+  };
+
+  // Retângulo de cobertura, em pixels, a partir da caixa (%) que o usuário posiciona
+  // no editor. Sempre a mesma opacidade fixa de 60% preto — propositalmente
+  // independente do preset, pois sua única função é ocultar legendas pré-existentes
+  // do vídeo original, não é um elemento estético.
+  const coverColour = hexToAss('#000000', 0.6);
+  const coverPxX = Math.round((box.x / 100) * playW);
+  const coverPxY = Math.round((box.y / 100) * playH);
+  const coverPxW = Math.round((box.w / 100) * playW);
+  const coverPxH = Math.round((box.h / 100) * playH);
+
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${playW}
+PlayResY: ${playH}
+ScaledBorderAndShadow: yes
+WrapStyle: ${bgOpacity > 0 ? 0 : 1}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColourFinal},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: CoverBox,Arial,10,${coverColour},&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+  const emphasisBigSize = Math.round(scaledFontSize * 2.4);
+  const emphasisSmallSize = Math.max(6, Math.round(scaledFontSize * 0.8));
+  const formatEmphasis = (text: string): string => {
+    if (!text.includes('**')) return text;
+    const result = text
+      .split(/(\*\*[^*]+\*\*)/)
+      .map(part => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const word = part.slice(2, -2);
+          return `{\\b1\\fs${emphasisBigSize}}${word}{\\b0\\fs${scaledFontSize}}`;
+        }
+        return part ? `{\\fs${emphasisSmallSize}}${part}` : part;
       })
-        .then(r => r.json())
-        .then(data => { if (data.subtitles) onSubChange(data.subtitles); })
-        .catch(() => {}); // silently fail — subtitles stay as-is
+      .join('');
+    return result;
+  };
+
+  const VIRAL_MAX_WORDS = 2;
+
+  const approximateWords = (sub: any): Array<{ word: string; start: number; end: number }> => {
+    const wordList = String(sub.text).replace(/\*\*/g, '').trim().split(/\s+/).filter(Boolean);
+    if (wordList.length === 0) return [];
+    const totalChars = wordList.reduce((a: number, w: string) => a + w.length, 0) || 1;
+    const duration = sub.end - sub.start;
+    let t = sub.start;
+    return wordList.map((w: string) => {
+      const dur = duration * (w.length / totalChars);
+      const entry = { word: w, start: t, end: t + dur };
+      t += dur;
+      return entry;
+    });
+  };
+
+  const buildKaraokeLines = (sub: any): string[] => {
+    const wordsData = (sub.words && sub.words.length > 0) ? sub.words : approximateWords(sub);
+    if (wordsData.length === 0) return [];
+    const lines: string[] = [];
+    for (let i = 0; i < wordsData.length; i += VIRAL_MAX_WORDS) {
+      const chunk = wordsData.slice(i, i + VIRAL_MAX_WORDS);
+      const nextChunkStart = wordsData[i + VIRAL_MAX_WORDS]?.start;
+      const chunkStart = chunk[0].start;
+      const chunkEnd = nextChunkStart ?? chunk[chunk.length - 1].end;
+      let prevEnd = chunkStart;
+      let text = '';
+      for (const w of chunk) {
+        const durCs = Math.max(1, Math.round((w.end - prevEnd) * 100));
+        const word = String(w.word).trim().toUpperCase();
+        text += `{\\k${durCs}}${word} `;
+        prevEnd = w.end;
+      }
+      // CORREÇÃO 3: Margem correta no Karaoke
+      // Layer 1: fica acima da caixa de cobertura (Layer 0)
+      lines.push(`Dialogue: 1,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
     }
+    return lines;
   };
-  const handleSavePreset = () => {
-    const name = window.prompt("Name this preset:");
-    if (name && name.trim()) onSaveCustomPreset(name.trim());
-  };
-  const listRef = useRef<HTMLDivElement>(null);
-  const activeIdx = subtitles.findIndex(s => currentTime >= s.start && currentTime <= s.end);
-  useEffect(() => {
-    if (activeIdx >= 0 && listRef.current)
-      (listRef.current.children[activeIdx] as HTMLElement)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [activeIdx]);
-  const updT = (i: number, text: string) => { const n = [...subtitles]; n[i] = { ...n[i], text }; onSubChange(n); };
-  const updTime = (i: number, f: "start" | "end", v: string) => {
-    const p = v.split(":").map(Number); const s = (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
-    if (!isNaN(s)) { const n = [...subtitles]; n[i] = { ...n[i], [f]: s }; onSubChange(n); }
-  };
-  return (
-    <div className="right-panel">
-      <div className="tab-bar">
-        <button className={`tab-btn ${tab === "style" ? "on" : ""}`} onClick={() => setTab("style")}>🎨 Style</button>
-        <button className={`tab-btn ${tab === "subs" ? "on" : ""}`} onClick={() => setTab("subs")}>📝 Subtitles <span className="tbadge">{subtitles.length}</span></button>
-      </div>
-      {tab === "style" && (
-        <div className="tab-body">
-          <div className="sec-label">Preset</div>
-          <div className="presets-wrap">
-            {PRESET_LIST.map(p => (
-              <button key={p.key} className={`preset-pill ${style.preset === p.key ? "on" : ""}`} onClick={() => applyPreset(p.key)}>{p.emoji} {p.label}</button>
-            ))}
-            {Object.entries(customPresets).map(([key, p]) => (
-              <button key={key} className={`preset-pill custom ${style.preset === key ? "on" : ""}`} onClick={() => applyPreset(key)}>
-                {p.emoji} {p.label}
-                <span className="preset-del" onClick={e => { e.stopPropagation(); onDeleteCustomPreset(key); }}>×</span>
-              </button>
-            ))}
-            <button className="preset-pill save" onClick={handleSavePreset}>＋ Save current</button>
-            <button className="preset-pill reset" onClick={onReset} title="Reset style & subtitles">↺ Reset</button>
-          </div>
-          <div className="divider" />
-          <div className="sec-label">Font</div>
-          <select className="sel" value={style.fontName} onChange={e => set({ fontName: e.target.value })}>{FONTS.map(f => <option key={f} value={f}>{f}</option>)}</select>
-          <div className="sec-label mt8">Font size <span className="val">{style.fontSize}px</span></div>
-          <div className="size-row">
-            <button className="size-btn" onClick={() => set({ fontSize: Math.max(10, style.fontSize - 2) })}>−</button>
-            <input type="range" min={10} max={120} value={style.fontSize} onChange={e => set({ fontSize: Number(e.target.value) })} className="rng" />
-            <button className="size-btn" onClick={() => set({ fontSize: Math.min(120, style.fontSize + 2) })}>+</button>
-            <span className="size-num">{style.fontSize}</span>
-          </div>
-          <div className="divider" />
-          <div className="sec-label">Text color</div>
-          <div className="color-row"><input type="color" className="cpick" value={style.primaryColor} onChange={e => set({ primaryColor: e.target.value })} /><span className="chex">{style.primaryColor}</span></div>
-          <div className="chips">{["#FFFFFF", "#FFFF00", "#00FFFF", "#FF4500", "#FF69B4", "#CC44FF", "#00FF41", "#FFD700", "#FF6B6B", "#4ECDC4", "#000000", "#1a1a2e"].map(c => (
-            <button key={c} className={`chip ${style.primaryColor === c ? "on" : ""}`} style={{ background: c, border: ["#FFFFFF", "#FFFF00", "#87CEEB", "#00FF88"].includes(c) ? "1px solid #555" : "none" }} onClick={() => set({ primaryColor: c })} />
-          ))}</div>
-          <div className="sec-label mt8">Outline color</div>
-          <div className="color-row"><input type="color" className="cpick" value={style.outlineColor} onChange={e => set({ outlineColor: e.target.value })} /><span className="chex">{style.outlineColor}</span></div>
-          <div className="chips">{["#000000", "#FFFFFF", "#0055FF", "#FFD700", "#FF4500", "#8B0057", "#003B00", "#330066", "#7B4F00", "#0088CC"].map(c => (
-            <button key={c} className={`chip ${style.outlineColor === c ? "on" : ""}`} style={{ background: c, border: c === "#FFFFFF" ? "1px solid #555" : "none" }} onClick={() => set({ outlineColor: c })} />
-          ))}</div>
-          <div className="divider" />
-          <div className="sec-label">Background <span className="val">{style.bgOpacity === 0 ? "off" : `${Math.round(style.bgOpacity * 100)}%`}</span></div>
-          <input type="range" min={0} max={1} step={0.05} value={style.bgOpacity} onChange={e => set({ bgOpacity: Number(e.target.value) })} className="rng" />
-        </div>
-      )}
-      {tab === "subs" && (
-        <div className="tab-body no-pad">
-          <div className="sub-list" ref={listRef}>
-            {subtitles.map((sub, i) => (
-              <div key={i} className={`sub-item ${activeIdx === i ? "hi" : ""}`}>
-                <div className="si-n">{i + 1}</div>
-                <div className="si-body">
-                  <div className="si-times">
-                    <input className="tc" defaultValue={toTimecode(sub.start)} onBlur={e => updTime(i, "start", e.target.value)} />
-                    <span className="tc-arr">→</span>
-                    <input className="tc" defaultValue={toTimecode(sub.end)} onBlur={e => updTime(i, "end", e.target.value)} />
-                  </div>
-                  <textarea className="si-txt" value={sub.text} onChange={e => updT(i, e.target.value)} rows={Math.max(2, Math.ceil(sub.text.length / 38))} />
-                </div>
-                <div className="si-meta">
-                  <span className="cdot" style={{ background: sub.confidence > 0.85 ? "var(--grn)" : sub.confidence > 0.7 ? "var(--amb)" : "var(--red)" }} />
-                  <button className="del-btn" onClick={() => onSubChange(subtitles.filter((_, j) => j !== i))}>×</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+
+  // Uma linha de cobertura por legenda original (não por "chunk" de palavra do preset
+  // viral), cobrindo o intervalo inteiro sub.start–sub.end. Sempre no Layer 0, sempre
+  // presente, independente do preset escolhido.
+  const buildCoverLine = (sub: any): string =>
+    `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},CoverBox,,0,0,0,,{\\an7\\pos(${coverPxX},${coverPxY})\\p1}m 0 0 l ${coverPxW} 0 l ${coverPxW} ${coverPxH} l 0 ${coverPxH}{\\p0}`;
+
+  const events = subtitles
+    .flatMap(sub => {
+      const coverLine = buildCoverLine(sub);
+      if (style.preset === 'viral') return [coverLine, ...buildKaraokeLines(sub)];
+      const text = formatEmphasis(sub.text);
+      // CORREÇÃO 4: Margem correta na legenda normal
+      // Layer 1: fica acima da caixa de cobertura (Layer 0)
+      return [coverLine, `Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${text}`];
+    })
+    .join('\n');
+
+  return header + events + '\n';
 }
 
-function CopyButton({ subtitles }: { subtitles: Subtitle[] }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => { navigator.clipboard.writeText(subtitles.map(s => s.text).join("\n")); setCopied(true); setTimeout(() => setCopied(false), 2000); };
-  return (
-    <button className={`export-card ${copied ? "done" : ""}`} onClick={copy}>
-      <span className="ei">{copied ? "✅" : "📋"}</span>
-      <span className="el">{copied ? "Copied!" : "Copy Text"}</span>
-      <span className="ed">{copied ? "Text in clipboard" : "Plain transcript"}</span>
-    </button>
-  );
-}
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
 
-// ─── ExportPanel ──────────────────────────────────────────────────────────────
-function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, dispH }: {
-  subtitles: Subtitle[]; videoFile: File | null;
-  style: SubStyle; onBack: () => void; nativeW: number; nativeH: number; dispH: number;
-}) {
-  const [rendering, setRendering] = useState(false);
-  const [done, setDone] = useState(false);
+  app.use(cors());
+  app.use(express.json());
 
-  const dl = (url: string, name: string) => { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
-  const post = (path: string, name: string) =>
-    fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subtitles }) })
-      .then(r => r.blob()).then(b => dl(URL.createObjectURL(b), name));
+  type JobStatus = 'processing' | 'done' | 'error';
+  const jobs = new Map<string, { status: JobStatus; error?: string; outputPath?: string }>();
 
-  const renderServer = async () => {
-    if (!videoFile) return;
-    setRendering(true); setDone(false);
+  app.post('/api/emphasis', express.json(), async (req, res) => {
     try {
-      const fontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 1;
-      const browserH = dispH > 0 ? dispH : nativeH;
-      const form = new FormData();
-      form.append("video", videoFile);
-      form.append("subtitles", JSON.stringify(subtitles));
-      form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH, nativeW, nativeH, fontScale }));
+      const { subtitles } = req.body;
+      if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
+      const result = await applyEmphasis(subtitles, groq);
+      res.json({ subtitles: result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
-      // Step 1: submit job — returns immediately with jobId
-      const res = await fetch("/api/render", { method: "POST", body: form });
-      if (!res.ok) throw new Error(await res.text());
-      const { jobId } = await res.json();
+  app.post('/api/render', upload.single('video'), async (req, res) => {
+    if (!req.file || !req.body.subtitles) {
+      return res.status(400).json({ error: 'Video file and subtitles are required' });
+    }
 
-      // Step 2: poll status every 3 seconds
-      await new Promise<void>((resolve, reject) => {
-        const interval = setInterval(async () => {
-          try {
-            const statusRes = await fetch(`/api/render/${jobId}/status`);
-            const { status, error } = await statusRes.json();
-            if (status === 'done') {
-              clearInterval(interval);
-              resolve();
-            } else if (status === 'error') {
-              clearInterval(interval);
-              reject(new Error(error || 'Render failed'));
+    const subtitles: any[] = JSON.parse(req.body.subtitles);
+    const style = req.body.style ? JSON.parse(req.body.style) : {};
+    const id = uuidv4();
+    const inputPath = req.file.path;
+    const assPath = `/tmp/${id}.ass`;
+    const outputPath = `/tmp/${id}_output.mp4`;
+
+    jobs.set(id, { status: 'processing' });
+    res.json({ jobId: id });
+
+    (async () => {
+      try {
+        const hasEmphasis = subtitles.some((s: any) => s.text && s.text.includes('**'));
+        console.log(`[render ${id}] Starting encode... hasEmphasis=${hasEmphasis} preset=${style.preset}`);
+        
+        const assContent = buildAss(subtitles, style);
+        fs.writeFileSync(assPath, assContent, 'utf8');
+
+        // DEBUG: loga o conteúdo do .ass
+        const debugAssPath = `/tmp/${id}_debug.ass`;
+        fs.writeFileSync(debugAssPath, assContent, 'utf8');
+        const dialogueLines = assContent.split('\n').filter((line: string) => line.startsWith('Dialogue:'));
+        console.log(`[render ${id}] ASS has ${dialogueLines.length} dialogue lines. First 3:`);
+        dialogueLines.slice(0, 3).forEach((line: string, i: number) => console.log(`  ${i+1}. ${line}`));
+
+        // Chama FFmpeg diretamente via spawn — USA ffmpeg-linux do projeto
+        const { spawn } = require('child_process');
+
+        // Usa ffmpeg-linux moderno do projeto se existir, senão fallback pro ffmpeg do sistema
+        const modernFfmpegPath = path.join(process.cwd(), 'ffmpeg-linux');
+        const ffmpegBinary = fs.existsSync(modernFfmpegPath) ? modernFfmpegPath : 'ffmpeg';
+        console.log(`[render ${id}] Using FFmpeg binary: ${ffmpegBinary}`);
+
+        const ffmpegArgs = [
+          '-y',
+          '-i', inputPath,
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', '23',
+          '-threads', '1',
+          '-tune', 'fastdecode',
+          '-vf', `ass=${assPath}`,
+          '-c:a', 'copy',
+          '-sn',
+          '-movflags', '+faststart',
+          '-f', 'mp4',
+          outputPath
+        ];
+        console.log(`[render ${id}] ffmpeg args:`, ffmpegArgs.join(' '));
+
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn(ffmpegBinary, ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+          let stderr = '';
+          proc.stderr.on('data', (data: Buffer) => { 
+            const line = data.toString();
+            stderr += line;
+            if (line.includes('font') || line.includes('bold') || line.includes('warn') || line.includes('error') || line.includes('ass')) {
+              console.log(`[render stderr]`, line.trim());
             }
-          } catch (e) {
-            // Don't reject on network error — just retry next interval
-            console.warn('[poll] status check failed, retrying...', e);
-          }
-        }, 3000);
+          });
+          proc.on('close', (code: number) => {
+            if (code === 0) {
+              console.log(`[render ${id}] Done`);
+              resolve();
+            } else {
+              reject(new Error(`ffmpeg exited with code ${code}. stderr: ${stderr.slice(-500)}`));
+            }
+          });
+          proc.on('error', reject);
+        });
+
+        jobs.set(id, { status: 'done', outputPath });
+        try { fs.unlinkSync(inputPath); } catch {}
+        try { fs.unlinkSync(assPath); } catch {}
+      } catch (e: any) {
+        console.error(`[render ${id}] Error:`, e);
+        jobs.set(id, { status: 'error', error: e.message });
+        try { fs.unlinkSync(inputPath); } catch {}
+        try { fs.unlinkSync(assPath); } catch {}
+        try { fs.unlinkSync(outputPath); } catch {}
+      }
+    })();
+  });
+
+  app.get('/api/render/:id/status', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    res.json({ status: job.status, error: job.error });
+  });
+
+  app.get('/api/render/:id/download', (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job || job.status !== 'done' || !job.outputPath) {
+      return res.status(404).json({ error: 'File not ready' });
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    res.download(job.outputPath, `subflow_export_${Date.now()}.mp4`, err => {
+      if (err) console.error(`[render ${req.params.id}] download error:`, err);
+      try { fs.unlinkSync(job.outputPath!); } catch {}
+      jobs.delete(req.params.id);
+    });
+  });
+
+  app.post('/api/transcribe', upload.single('video'), async (req, res) => {
+    const tmpFiles: string[] = [];
+    const cleanup = () => tmpFiles.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
+
+    try {
+      if (!req.file) return res.status(400).json({ error: 'Video file is required' });
+
+      const targetLang = req.body.targetLang || 'original';
+      const id = uuidv4();
+      const inputPath = req.file.path;
+      const audioPath = `/tmp/${id}_audio.mp3`;
+      tmpFiles.push(inputPath, audioPath);
+
+      console.log(`[transcribe ${id}] Extracting audio...`);
+
+      process.env.FONTCONFIG_PATH = path.join(process.cwd(), '_fonts');
+      process.env.FC_FONT_PATH = path.join(process.cwd(), '_fonts');
+
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(inputPath)
+          .noVideo()
+          .audioCodec('libmp3lame')
+          .audioBitrate(128)
+          .audioChannels(1)
+          .outputOptions(['-af', 'aresample=async=1', '-threads', '1'])
+          .on('end', () => resolve())
+          .on('error', reject)
+          .save(audioPath);
       });
 
-      // Step 3: download
-      dl(`/api/render/${jobId}/download`, "subflow_export.mp4");
-      setDone(true);
+      const audioSize = fs.statSync(audioPath).size;
+      console.log(`[transcribe ${id}] Audio ready. Size: ${(audioSize / 1024 / 1024).toFixed(1)}MB. Sending to Groq Whisper...`);
+
+      if (audioSize > 24 * 1024 * 1024) {
+        cleanup();
+        return res.status(400).json({ error: 'Audio too large for transcription (max ~10 min).' });
+      }
+
+      let transcription: any;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          transcription = await groq.audio.transcriptions.create({
+            file: fs.createReadStream(audioPath),
+            model: 'whisper-large-v3-turbo',
+            response_format: 'verbose_json',
+            timestamp_granularities: ['segment', 'word'],
+          });
+          break;
+        } catch (e: any) {
+          console.warn(`[transcribe ${id}] Whisper attempt ${attempt} failed:`, e.message);
+          if (attempt === 3) throw e;
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
+      }
+
+      const rawSegments: Array<{ start: number; end: number; text: string }> =
+        (transcription as any).segments ?? [];
+      const words: Array<{ start: number; end: number; word: string }> =
+        (transcription as any).words ?? [];
+
+      const MAX_SEG_DURATION = 5;
+      const splitSegments: Array<{ start: number; end: number; text: string }> = [];
+
+      for (const seg of rawSegments) {
+        const dur = seg.end - seg.start;
+        if (dur <= MAX_SEG_DURATION) {
+          splitSegments.push(seg);
+          continue;
+        }
+        const segWords = words.filter(w => w.start >= seg.start && w.end <= seg.end + 0.1);
+
+        if (segWords.length === 0) {
+          const allWords = seg.text.trim().split(' ').filter(Boolean);
+          const numChunks = Math.max(1, Math.ceil(dur / MAX_SEG_DURATION));
+          const wordsPerChunk = Math.ceil(allWords.length / numChunks);
+          const chunkDur = dur / numChunks;
+          for (let i = 0; i < numChunks; i++) {
+            const chunkWords = allWords.slice(i * wordsPerChunk, (i + 1) * wordsPerChunk);
+            if (chunkWords.length > 0) {
+              splitSegments.push({
+                start: seg.start + i * chunkDur,
+                end: Math.min(seg.start + (i + 1) * chunkDur, seg.end),
+                text: chunkWords.join(' ').trim(),
+              });
+            }
+          }
+          continue;
+        }
+
+        let chunk: typeof segWords = [];
+        let chunkStart = segWords[0].start;
+        for (const w of segWords) {
+          chunk.push(w);
+          if (w.end - chunkStart >= MAX_SEG_DURATION) {
+            splitSegments.push({
+              start: chunkStart,
+              end: w.end,
+              text: chunk.map(x => x.word).join(' ').trim(),
+            });
+            chunk = [];
+            chunkStart = w.end;
+          }
+        }
+        if (chunk.length > 0) {
+          splitSegments.push({
+            start: chunkStart,
+            end: chunk[chunk.length - 1].end,
+            text: chunk.map(x => x.word).join(' ').trim(),
+          });
+        }
+      }
+
+      let segments = splitSegments;
+
+      const LANG_MAP: Record<string, string> = {
+        'es': 'Spanish', 'pt': 'Portuguese', 'fr': 'French', 'de': 'German',
+        'it': 'Italian', 'ja': 'Japanese', 'ko': 'Korean', 'zh': 'Chinese',
+        'ru': 'Russian', 'ar': 'Arabic', 'hi': 'Hindi', 'en': 'English'
+      };
+      const fullLangName = LANG_MAP[targetLang.toLowerCase()] || targetLang;
+
+      if (targetLang !== 'original' && segments.length > 0) {
+        console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${fullLangName}...`);
+
+        const BATCH_SIZE = 15;
+        const translationMap = new Map<number, string>();
+
+        const translateBatch = async (batchSegments: typeof segments, offset: number) => {
+          const numbered = batchSegments.map((s, i) => `${offset + i + 1}|||${s.text}`).join('\n');
+          const chat = await groq.chat.completions.create({
+            model: 'openai/gpt-oss-120b',
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert translator. Translate each subtitle line to ${fullLangName}.
+CRITICAL RULE: The final output MUST be in ${fullLangName}. Do NOT output in English unless ${fullLangName} is English.
+Rules:
+- Each line starts with a number and ||| separator. Keep the exact same format.
+- Keep translations CONCISE — same length or shorter than the original. Use natural contractions.
+- Never add words not in the original. Prioritize brevity over literal accuracy.
+- Return ONLY the translated lines with their numbers, nothing else.
+Example:
+Input:  1|||Hello world
+        2|||How are you doing today
+Output: 1|||Olá mundo
+        2|||Como vai você`,
+              },
+              { role: 'user', content: numbered },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+          });
+          const raw = chat.choices[0]?.message?.content ?? '';
+          for (const line of raw.split('\n')) {
+            const match = line.match(/^(\d+)\|\|\|(.+)$/);
+            if (match) translationMap.set(parseInt(match[1]), match[2].trim());
+          }
+        };
+
+        for (let i = 0; i < segments.length; i += BATCH_SIZE) {
+          const batch = segments.slice(i, i + BATCH_SIZE);
+          let success = false;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              await translateBatch(batch, i);
+              success = true;
+              break;
+            } catch (e) {
+              console.warn(`[transcribe ${id}] Batch ${i} attempt ${attempt} failed:`, e);
+              if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+            }
+          }
+          if (!success) console.warn(`[transcribe ${id}] Batch ${i} failed after retries, keeping original`);
+        }
+
+        segments = segments.map((s, i) => ({
+          ...s,
+          text: translationMap.get(i + 1) ?? s.text,
+        }));
+        console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
+      }
+
+      const MAX_CHARS = 42;
+      const finalSegments: typeof segments = [];
+      for (const seg of segments) {
+        const text = seg.text.trim();
+        if (text.length <= MAX_CHARS * 2) {
+          finalSegments.push(seg);
+          continue;
+        }
+        const words = text.split(' ');
+        const chunks: string[] = [];
+        let current = '';
+        for (const word of words) {
+          if ((current + ' ' + word).trim().length > MAX_CHARS && current) {
+            chunks.push(current.trim());
+            current = word;
+          } else {
+            current = current ? current + ' ' + word : word;
+          }
+        }
+        if (current) chunks.push(current.trim());
+        const dur = seg.end - seg.start;
+        const timePerChunk = dur / chunks.length;
+        for (let i = 0; i < chunks.length; i += 2) {
+          const pair = chunks.slice(i, i + 2).join(' ');
+          finalSegments.push({
+            start: seg.start + i * timePerChunk,
+            end: Math.min(seg.start + (i + 2) * timePerChunk, seg.end),
+            text: pair,
+          });
+        }
+      }
+
+      let subtitles = finalSegments
+        .filter(s => s.text.trim().length > 0)
+        .map(s => ({
+          start: s.start,
+          end: s.end,
+          text: s.text.trim(),
+          confidence: 0.9,
+        })) as Array<{ start: number; end: number; text: string; confidence: number; words?: Array<{ word: string; start: number; end: number }> }>;
+
+      if (targetLang === 'original' && words.length > 0) {
+        for (const sub of subtitles) {
+          sub.words = words.filter(w => w.start >= sub.start - 0.05 && w.end <= sub.end + 0.15);
+        }
+      }
+
+      if (req.body.emphasis === 'true' && subtitles.length > 0) {
+        console.log(`[transcribe ${id}] Applying emphasis...`);
+        try {
+          const emphTexts = subtitles.map((s, i) => `${i + 1}|||${s.text}`).join('\n');
+          const emphChat = await groq.chat.completions.create({
+            model: 'openai/gpt-oss-120b',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a subtitle emphasis editor. For each subtitle line, identify the 1-2 most important words (key nouns or verbs) and wrap ONLY those words in **double asterisks**. Keep all other words exactly as-is. Return the same numbered format with ||| separator. Nothing else.
+Example:
+Input:  1|||you need to find the demand
+Output: 1|||you need to find the **demand**`,
+              },
+              { role: 'user', content: emphTexts },
+            ],
+            temperature: 0.1,
+            max_tokens: 4096,
+          });
+          const emphRaw = emphChat.choices[0]?.message?.content ?? '';
+          const emphMap = new Map<number, string>();
+          for (const line of emphRaw.split('\n')) {
+            const match = line.match(/^(\d+)\|\|\|(.+)$/);
+            if (match) emphMap.set(parseInt(match[1]), match[2].trim());
+          }
+          subtitles = subtitles.map((s, i) => ({
+            ...s,
+            text: emphMap.get(i + 1) ?? s.text,
+          }));
+          console.log(`[transcribe ${id}] Emphasis OK`);
+        } catch (e) {
+          console.warn(`[transcribe ${id}] Emphasis failed, keeping original`);
+        }
+      }
+
+      cleanup();
+      res.json({ subtitles });
+
     } catch (e: any) {
-      alert("Render failed: " + (e?.message ?? e));
-    } finally {
-      setRendering(false);
+      console.error('[transcribe] Error:', e);
+      cleanup();
+      if (!res.headersSent) res.status(500).json({ error: e.message || 'Transcription failed' });
     }
-  };
-
-  return (
-    <div className="export-panel">
-      <h3>Export</h3>
-      <p className="export-sub">Choose your output format</p>
-      <div className="export-grid">
-        <button className="export-card" onClick={() => post("/api/export/srt", "subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
-        <button className="export-card" onClick={() => post("/api/export/vtt", "subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
-        <CopyButton subtitles={subtitles} />
-        <button
-          className={`export-card accent ${rendering ? "loading" : ""} ${done ? "done" : ""}`}
-          onClick={renderServer}
-          disabled={rendering || !videoFile}
-          style={{ gridColumn: "1 / -1" }}
-        >
-          <span className="ei">{done ? "✅" : rendering ? "⏳" : "🎬"}</span>
-          <span className="el">{done ? "Downloaded!" : rendering ? "Rendering…" : "Burn to Video — MP4"}</span>
-          <span className="ed">{rendering ? "FFmpeg encoding on server…" : done ? "Saved to downloads" : "Embeds subtitles into MP4 · universal format"}</span>
-        </button>
-      </div>
-      <button className="btn-ghost" onClick={onBack}>← Back to editor</button>
-    </div>
-  );
-}
-
-// ─── Main App ─────────────────────────────────────────────────────────────────
-export default function App() {
-  const [step, setStep] = useState<Step>("upload");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [targetLang, setTargetLang] = useState("original");
-  const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
-  const [originalSubtitles, setOriginalSubtitles] = useState<Subtitle[]>([]);
-  const [style, setStyle] = useState<SubStyle>(DEFAULT_STYLE);
-  const [error, setError] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [nativeW, setNativeW] = useState(0);
-  const [nativeH, setNativeH] = useState(0);
-  const [dispH, setDispH] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  // Custom presets — saved with a name via "＋ Save current", persisted across sessions.
-  const [customPresets, setCustomPresets] = useState<Record<string, CustomPreset>>(() => {
-    try { return JSON.parse(localStorage.getItem(CUSTOM_PRESETS_KEY) || "{}"); } catch { return {}; }
   });
-  const saveCustomPresets = (next: Record<string, CustomPreset>) => {
-    setCustomPresets(next);
-    try { localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next)); } catch {}
-  };
-  const handleSaveCustomPreset = (name: string) => {
-    const key = "custom_" + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now().toString(36);
-    const next = {
-      ...customPresets,
-      [key]: {
-        label: name.trim(), emoji: "⭐",
-        fontName: style.fontName, fontSize: style.fontSize,
-        primaryColor: style.primaryColor, outlineColor: style.outlineColor,
-        bgOpacity: style.bgOpacity,
-      },
-    };
-    saveCustomPresets(next);
-    setStyle(s => ({ ...s, preset: key }));
-  };
-  const handleDeleteCustomPreset = (key: string) => {
-    const next = { ...customPresets };
-    delete next[key];
-    saveCustomPresets(next);
-    if (style.preset === key) setStyle(s => ({ ...s, preset: "custom" }));
-  };
 
-  const resetAll = () => {
-    setStyle(DEFAULT_STYLE);
-    if (originalSubtitles.length > 0) {
-      setSubtitles(originalSubtitles);
+  app.post('/api/export/srt', (req, res) => {
+    const { subtitles } = req.body;
+    if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
+    res.setHeader('Content-Disposition', 'attachment; filename="subtitles.srt"');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(buildSrt(subtitles));
+  });
+
+  app.post('/api/export/vtt', (req, res) => {
+    const { subtitles } = req.body;
+    if (!Array.isArray(subtitles)) return res.status(400).json({ error: 'subtitles required' });
+    const vtt = 'WEBVTT\n\n' + subtitles
+      .map((sub: any, i: number) => {
+        const fmt = (s: number) => formatSrtTime(s).replace(',', '.');
+        return `${i + 1}\n${fmt(sub.start)} --> ${fmt(sub.end)}\n${sub.text}`;
+      })
+      .join('\n\n') + '\n';
+    res.setHeader('Content-Disposition', 'attachment; filename="subtitles.vtt"');
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.send(vtt);
+  });
+
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  }
+
+  app.use((req, res, next) => {
+    if (req.path === '/api/render') {
+      req.socket.setTimeout(300000);
+      res.setTimeout(300000);
     }
-  };
+    next();
+  });
 
-  // Strip HTML emphasis tags from subtitles when switching away from emphasis preset
-  const stripEmphasisTags = (subs: Subtitle[]) => {
-    return subs.map(sub => ({
-      ...sub,
-      text: sub.text
-        .replace(/<b[^>]*>/gi, '')
-        .replace(/<\/b>/gi, '')
-        .replace(/<em[^>]*>/gi, '')
-        .replace(/<\/em>/gi, '')
-        .replace(/<strong[^>]*>/gi, '')
-        .replace(/<\/strong>/gi, '')
-        .replace(/<i[^>]*>/gi, '')
-        .replace(/<\/i>/gi, '')
-    }));
-  };
-
-  const measureH = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const h = v.getBoundingClientRect().height;
-    if (h > 0) setDispH(h);
-  }, [nativeH]);
-
-  useEffect(() => {
-    const obs = new ResizeObserver(() => setTimeout(measureH, 50));
-    if (videoRef.current) obs.observe(videoRef.current);
-    return () => obs.disconnect();
-  }, [measureH]);
-
-  const fontScale = dispH > 0 && nativeH > 0 ? dispH / nativeH : 0.2;
-
-  const handleFile = useCallback((f: File) => {
-    setVideoFile(f); setVideoUrl(URL.createObjectURL(f)); setError(null);
-    setNativeW(0); setNativeH(0); setDispH(0);
-  }, []);
-
-  const startTranscription = async () => {
-    if (!videoFile) return; setStep("processing"); setError(null);
-    try {
-      const form = new FormData(); form.append("video", videoFile); form.append("targetLang", targetLang);
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
-      setSubtitles(data.subtitles); setOriginalSubtitles(data.subtitles); setStep("edit");
-    } catch (e: any) { setError(e.message ?? "Unknown error."); setStep("upload"); }
-  };
-
-  const currentSub = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
-  const stepIndex = ["upload", "processing", "edit", "export"].indexOf(step);
-
-  return (
-    <>
-      <style>{CSS}</style>
-      <div className="app">
-        <header className="hdr">
-          <div className="logo">
-            <svg viewBox="0 0 32 32" fill="none" width="22" height="22">
-              <rect x="2" y="6" width="28" height="20" rx="3" stroke="#f59e0b" strokeWidth="1.5" />
-              <path d="M13 13L19 16L13 19V13Z" fill="#f59e0b" />
-              <path d="M2 12H30" stroke="#f59e0b" strokeWidth="1.5" />
-              <circle cx="6" cy="9" r="1" fill="#f59e0b" />
-              <circle cx="9.5" cy="9" r="1" fill="#f59e0b" />
-              <circle cx="13" cy="9" r="1" fill="#f59e0b" />
-            </svg>
-            <span className="logo-txt">SubFlow</span>
-          </div>
-          <div className="steps-nav">
-            {[1, 2, 3, 4].map((n, i) => (
-              <span key={n} className={`sdot ${stepIndex === i ? "active" : ""} ${stepIndex > i ? "done" : ""}`}>{n}</span>
-            ))}
-          </div>
-          {step === "edit" && (
-            <div className="hdr-acts">
-              <button className="btn-sm-o" onClick={() => setStep("upload")}>← New</button>
-              <button className="btn-sm-p" onClick={() => { videoRef.current?.pause(); setStep("export"); }}>Export →</button>
-            </div>
-          )}
-        </header>
-
-        <main className="main">
-          {step === "upload" && (
-            <div className="page-ctr fade-in">
-              <div className="hero"><h1>Transcribe & translate<br />your videos</h1><p>Powered by Whisper AI — free, fast, no subscription</p></div>
-              {error && <div className="err-banner">⚠ {error}</div>}
-              <UploadZone onFile={handleFile} />
-              {videoFile && (
-                <div className="file-card fade-in">
-                  <div className="file-row">
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style={{ color: "var(--amb)", flexShrink: 0 }}><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.5" /><path d="M10 9L15 12L10 15V9Z" fill="currentColor" /></svg>
-                    <div><p className="fname">{videoFile.name}</p><p className="fmeta">{formatSize(videoFile.size)}</p></div>
-                    <button className="clear-btn" onClick={() => { setVideoFile(null); setVideoUrl(""); }}>×</button>
-                  </div>
-                  <div className="fld">
-                    <label>Translate to</label>
-                    <select value={targetLang} onChange={e => setTargetLang(e.target.value)}>
-                      {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                    </select>
-                  </div>
-                  <button className="btn-primary" onClick={startTranscription}>
-                    <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
-                    Start transcription
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {step === "processing" && (
-            <div className="page-ctr fade-in"><ProcessingView fileName={videoFile?.name ?? ""} /></div>
-          )}
-
-          {step === "edit" && (
-            <div className="editor-page fade-in">
-              <div className="vid-col">
-                <div style={{ position: "relative", display: "inline-block", flexShrink: 0, borderRadius: 12, overflow: "hidden", background: "#000" }}>
-                  <video ref={videoRef} src={videoUrl} controls
-                    style={{ display: "block", maxHeight: "calc(100vh - 90px)", maxWidth: "min(calc(100vw - 310px), 100%)", width: "auto", height: "auto" }}
-                    onTimeUpdate={e => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
-                    onLoadedMetadata={e => { const v = e.target as HTMLVideoElement; setNativeW(v.videoWidth); setNativeH(v.videoHeight); setTimeout(measureH, 100); }}
-                    onLoadedData={() => setTimeout(measureH, 100)}
-                  />
-                  <SubtitleBox text={currentSub?.text ?? ""} style={style} onChange={setStyle} fontScale={fontScale} />
-                </div>
-                <p className="drag-hint">⠿ Drag box to move · drag corners to resize</p>
-              </div>
-              <RightPanel
-                style={style} onChange={setStyle} subtitles={subtitles} onSubChange={setSubtitles} currentTime={currentTime}
-                customPresets={customPresets} onSaveCustomPreset={handleSaveCustomPreset} onDeleteCustomPreset={handleDeleteCustomPreset}
-                onReset={resetAll} stripEmphasisTags={stripEmphasisTags}
-              />
-            </div>
-          )}
-
-          {step === "export" && (
-            <div className="page-ctr fade-in">
-              <ExportPanel subtitles={subtitles} videoFile={videoFile} style={{ ...style, nativeW, nativeH, fontScale, browserH: dispH }} onBack={() => setStep("edit")} nativeW={nativeW} nativeH={nativeH} dispH={dispH} />
-            </div>
-          )}
-        </main>
-      </div>
-    </>
-  );
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`SubFlow server running on http://localhost:${PORT}`);
+  });
 }
 
-const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap');
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  :root{--bg:#0d0f12;--s1:#161920;--s2:#1e2229;--brd:rgba(255,255,255,0.07);--txt:#e8eaf0;--mut:#6b7280;--amb:#f59e0b;--amd:rgba(245,158,11,0.12);--amg:rgba(245,158,11,0.22);--grn:#34d399;--red:#f87171;--r:9px;--rl:14px;}
-  html,body,#root{height:100%;overflow:hidden}
-  body{background:var(--bg);color:var(--txt);font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-  .app{height:100vh;display:flex;flex-direction:column}
-  .hdr{display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--brd);background:rgba(13,15,18,0.97);flex-shrink:0}
-  .logo{display:flex;align-items:center;gap:8px;margin-right:auto}
-  .logo-txt{font-family:'Syne',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.02em}
-  .steps-nav{display:flex;gap:5px}
-  .sdot{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;border:1.5px solid var(--brd);color:var(--mut);background:var(--s1);transition:all .2s}
-  .sdot.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
-  .sdot.done{border-color:var(--grn);color:var(--grn);background:rgba(52,211,153,0.1)}
-  .hdr-acts{display:flex;gap:8px}
-  .btn-sm-p{background:var(--amb);color:#0d0f12;border:none;border-radius:7px;font-family:'Syne',sans-serif;font-weight:700;font-size:12px;padding:7px 14px;cursor:pointer}
-  .btn-sm-p:hover{background:#fbbf24}
-  .btn-sm-o{background:transparent;color:var(--txt);border:1.5px solid var(--brd);border-radius:7px;font-size:12px;padding:6px 12px;cursor:pointer}
-  .btn-sm-o:hover{border-color:var(--amb);color:var(--amb)}
-  .main{flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center}
-  .page-ctr{width:100%;max-width:540px;padding:28px 20px;overflow-y:auto;max-height:100%}
-  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-  .fade-in{animation:fadeUp .3s ease both}
-  .hero{margin-bottom:22px}
-  .hero h1{font-family:'Syne',sans-serif;font-weight:800;font-size:clamp(22px,4vw,34px);line-height:1.1;letter-spacing:-0.03em}
-  .hero p{color:var(--mut);margin-top:6px;font-size:13px}
-  .upload-zone{border:2px dashed var(--brd);border-radius:var(--rl);padding:38px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--s1)}
-  .upload-zone:hover,.upload-zone.active{border-color:var(--amb);background:var(--amd)}
-  .upload-icon{width:44px;height:44px;margin:0 auto 12px;color:var(--amb)}
-  .upload-icon svg{width:100%;height:100%}
-  .upload-title{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;margin-bottom:5px}
-  .upload-sub{color:var(--mut);font-size:12px;margin-bottom:16px}
-  .btn-outline{background:transparent;color:var(--txt);border:1.5px solid var(--brd);border-radius:var(--r);font-size:13px;padding:8px 16px;cursor:pointer;transition:all .2s}
-  .btn-outline:hover{border-color:var(--amb);color:var(--amb)}
-  .btn-primary{display:inline-flex;align-items:center;gap:8px;justify-content:center;background:var(--amb);color:#0d0f12;border:none;border-radius:var(--r);font-family:'Syne',sans-serif;font-weight:700;font-size:14px;padding:11px 20px;cursor:pointer;transition:all .2s;width:100%;box-shadow:0 0 14px var(--amg)}
-  .btn-primary:hover{background:#fbbf24}
-  .btn-ghost{background:transparent;border:none;color:var(--mut);font-size:13px;cursor:pointer;transition:color .2s;padding:4px 0;display:block;margin-top:6px}
-  .btn-ghost:hover{color:var(--txt)}
-  .err-banner{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);border-radius:var(--r);padding:10px 14px;color:#f87171;font-size:12px;margin-bottom:14px}
-  .file-card{margin-top:14px;background:var(--s1);border:1px solid var(--brd);border-radius:var(--rl);padding:14px;display:flex;flex-direction:column;gap:11px}
-  .file-row{display:flex;align-items:center;gap:10px}
-  .fname{font-weight:500;font-size:13px}
-  .fmeta{font-size:11px;color:var(--mut);font-family:'JetBrains Mono',monospace}
-  .clear-btn{margin-left:auto;background:none;border:none;color:var(--mut);font-size:18px;cursor:pointer;line-height:1}
-  .clear-btn:hover{color:var(--red)}
-  .fld{display:flex;flex-direction:column;gap:5px}
-  .fld label{font-size:11px;color:var(--mut);font-weight:500;letter-spacing:.05em;text-transform:uppercase}
-  .fld select{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:13px;padding:8px 10px;cursor:pointer;outline:none}
-  .fld select:focus{border-color:var(--amb)}
-  .processing-view{text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px;padding:40px 0}
-  .spinner-wrap{position:relative;width:58px;height:58px;display:flex;align-items:center;justify-content:center}
-  .spinner-ring{position:absolute;inset:0;color:var(--amb);animation:spin 1.4s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .spinner-icon{color:var(--amb);width:22px;height:22px}
-  .proc-title{font-family:'Syne',sans-serif;font-weight:700;font-size:18px}
-  .proc-file{font-size:11px;color:var(--mut);font-family:'JetBrains Mono',monospace;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .proc-steps{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
-  .sbadge{font-size:10px;padding:3px 9px;border-radius:20px;border:1px solid var(--brd);color:var(--mut);background:var(--s1);font-family:'JetBrains Mono',monospace}
-  .sbadge.active{border-color:var(--amb);color:var(--amb);background:var(--amd)}
-  .editor-page{width:100%;height:100%;display:flex;overflow:hidden}
-  .vid-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px;gap:4px}
-  .drag-hint{font-size:11px;color:var(--mut);text-align:center}
-  .right-panel{width:380px;flex-shrink:0;border-left:1px solid var(--brd);display:flex;flex-direction:column;overflow:hidden;background:var(--s1)}
-  .tab-bar{display:flex;border-bottom:1px solid var(--brd);flex-shrink:0}
-  .tab-btn{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--mut);font-size:14px;font-weight:500;padding:13px 8px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:-1px}
-  .tab-btn.on{color:var(--amb);border-bottom-color:var(--amb)}
-  .tbadge{background:var(--s2);border:1px solid var(--brd);border-radius:20px;font-family:'JetBrains Mono',monospace;font-size:9px;padding:1px 6px;color:var(--mut)}
-  .tab-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-  .tab-body.no-pad{padding:0;flex:1;overflow:hidden;display:flex;flex-direction:column}
-  .tab-body::-webkit-scrollbar{width:3px}
-  .tab-body::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
-  .sec-label{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.04em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
-  .sec-label.mt8{margin-top:4px}
-  .val{color:var(--amb);font-family:'JetBrains Mono',monospace;font-size:12px}
-  .presets-wrap{display:flex;flex-wrap:wrap;gap:5px}
-  .preset-pill{background:var(--s2);border:1.5px solid var(--brd);border-radius:20px;color:var(--mut);font-size:13px;padding:6px 12px;cursor:pointer;transition:all .2s;white-space:nowrap;position:relative}
-  .preset-pill.on{border-color:var(--amb);color:var(--amb);background:var(--amd)}
-  .preset-pill.custom{padding-right:22px}
-  .preset-pill.save{border-style:dashed;color:var(--amb)}
-  .preset-pill.reset{border-style:dashed;color:var(--red)}
-  .preset-pill.reset:hover{border-color:var(--red);background:rgba(239,68,68,0.1)}
-  .preset-del{position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:13px;line-height:1;color:var(--mut);padding:0 3px}
-  .preset-del:hover{color:var(--red)}
-  .divider{height:1px;background:var(--brd);margin:4px 0}
-  .sel{background:var(--s2);border:1.5px solid var(--brd);border-radius:var(--r);color:var(--txt);font-size:14px;padding:9px 11px;cursor:pointer;outline:none;width:100%}
-  .sel:focus{border-color:var(--amb)}
-  .size-row{display:flex;align-items:center;gap:6px}
-  .size-btn{background:var(--s2);border:1px solid var(--brd);border-radius:6px;color:var(--txt);font-size:20px;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
-  .size-btn:hover{border-color:var(--amb);color:var(--amb)}
-  .size-num{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--amb);min-width:32px;text-align:center;flex-shrink:0}
-  .rng{flex:1;accent-color:var(--amb);cursor:pointer}
-  .color-row{display:flex;align-items:center;gap:7px}
-  .cpick{width:34px;height:34px;border:none;background:none;cursor:pointer;padding:0;border-radius:6px;flex-shrink:0}
-  .chex{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--mut)}
-  .chips{display:flex;gap:5px;margin-top:3px}
-  .chip{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
-  .chip.on{border-color:var(--amb);transform:scale(1.2)}
-  .sub-list{flex:1;overflow-y:auto}
-  .sub-list::-webkit-scrollbar{width:3px}
-  .sub-list::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px}
-  .sub-item{display:grid;grid-template-columns:24px 1fr auto;gap:5px 8px;padding:10px 12px;border-bottom:1px solid var(--brd);transition:background .15s}
-  .sub-item:last-child{border-bottom:none}
-  .sub-item:hover{background:rgba(255,255,255,0.02)}
-  .sub-item.hi{background:var(--amd);border-left:2px solid var(--amb)}
-  .si-n{grid-row:1/3;align-self:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--mut);text-align:center}
-  .si-body{display:flex;flex-direction:column;gap:3px}
-  .si-times{display:flex;align-items:center;gap:4px;margin-bottom:3px}
-  .tc{background:var(--s2);border:1px solid var(--brd);border-radius:4px;color:var(--txt);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 7px;width:90px;outline:none}
-  .tc:focus{border-color:var(--amb)}
-  .tc-arr{color:var(--mut);font-size:9px}
-  .si-txt{background:transparent;border:none;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:14px;resize:vertical;outline:none;width:100%;line-height:1.5;padding:4px 0;min-height:42px;overflow-y:auto}
-  .si-meta{grid-row:1/3;align-self:center;display:flex;flex-direction:column;align-items:center;gap:5px}
-  .cdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-  .del-btn{background:none;border:none;color:var(--mut);font-size:14px;cursor:pointer;transition:color .2s;line-height:1}
-  .del-btn:hover{color:var(--red)}
-  .export-panel{display:flex;flex-direction:column;gap:18px}
-  .export-panel h3{font-family:'Syne',sans-serif;font-weight:800;font-size:24px}
-  .export-sub{color:var(--mut);font-size:13px;margin-top:-10px}
-  .export-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-  .export-card{background:var(--s1);border:1.5px solid var(--brd);border-radius:var(--rl);padding:15px 13px;display:flex;flex-direction:column;align-items:flex-start;gap:4px;cursor:pointer;transition:all .2s;text-align:left;width:100%}
-  .export-card:hover:not(:disabled){border-color:var(--amb);background:var(--amd)}
-  .export-card:disabled{opacity:.5;cursor:not-allowed}
-  .export-card.accent{border-color:var(--amb);background:var(--amd)}
-  .export-card.loading{opacity:.8;cursor:wait}
-  .export-card.done{border-color:var(--grn);background:rgba(52,211,153,0.08)}
-  .ei{font-size:19px}.el{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--txt)}.ed{font-size:11px;color:var(--mut)}
-  @media(max-width:900px){.right-panel{width:300px}}
-  @media(max-width:600px){.editor-page{flex-direction:column}.vid-col{flex:none;height:55%}.right-panel{width:100%;border-left:none;border-top:1px solid var(--brd)}}
-`;
+startServer();
