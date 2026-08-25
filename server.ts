@@ -144,9 +144,13 @@ function buildAss(subtitles: any[], style: any): string {
   const primaryAss = hexToAss(primaryColor, 0);
   const outlineAss = hexToAss(outlineColor, 0);
   const secondaryAss = hexToAss('#FFFFFF', 0);
-  const backColour = hexToAss('#000000', 0.5);
 
-  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','whitebox','viral','podcast'];
+  // FIX: antes o fundo do texto (usado pelos presets "com caixa", ex. cinema/darkbox/
+  // whitebox/classic/podcast) ignorava o valor de bgOpacity escolhido pelo usuário e
+  // sempre usava 0.6 fixo. Agora respeita o slider quando bgOpacity > 0.
+  const backColourFinal = hexToAss('#000000', bgOpacity > 0 ? bgOpacity : 0.6);
+
+  const impactPresets = ['impact','bold','fire','shadow','karaoke','retro','purple','reels','viral','podcast'];
   const isBold = impactPresets.includes(style.preset) || fontName === 'Impact' ? '-1' : '0';
 
   const shadowDepth = bgOpacity > 0 ? 3
@@ -164,9 +168,21 @@ function buildAss(subtitles: any[], style: any): string {
     : style.preset === 'bold' ? 3
     : 2;
 
-  // BorderStyle=3 = fundo opaco por trás do texto (cobre legendas queimadas do vídeo original)
-  const borderStyle = 3;
-  const backColourFinal = hexToAss('#000000', 0.6);
+  // FIX PRINCIPAL: antes, a cobertura de legendas queimadas do vídeo original
+  // dependia inteiramente do BorderStyle=3 (caixa "colada" ao texto, cujo padding é
+  // o próprio Outline). Isso funciona OK quando bgOpacity>0, mas para os presets sem
+  // fundo (impact, minimal, clean, etc — a maioria) o padding é de 1-4px: se a legenda
+  // original for mais larga/alta que o texto traduzido (comum, já que o comprimento
+  // muda entre idiomas), sobras da legenda original continuam visíveis, dando a
+  // impressão de que a tradução "não aparece" no vídeo exportado.
+  //
+  // A partir de agora, SEMPRE desenhamos um retângulo opaco fixo cobrindo toda a área
+  // da caixa de legenda definida pelo usuário (box.x/y/w/h), num layer abaixo do texto.
+  // Isso garante cobertura total independente do preset ou do tamanho da tradução.
+  // BorderStyle volta a ser 1 (contorno normal, sem caixa extra) quando bgOpacity=0,
+  // já que a cobertura de baixo já resolve isso — o texto fica limpo, como o preset
+  // originalmente prometia.
+  const borderStyle = bgOpacity > 0 ? 3 : 1;
 
   const marginL = Math.round((box.x / 100) * playW);
   const marginR = Math.round(((100 - box.x - box.w) / 100) * playW);
@@ -180,6 +196,16 @@ function buildAss(subtitles: any[], style: any): string {
     return `${h}:${String(m).padStart(2, '0')}:${sec}`;
   };
 
+  // Retângulo de cobertura, em pixels, a partir da caixa (%) que o usuário posiciona
+  // no editor. Sempre a mesma opacidade fixa de 60% preto — propositalmente
+  // independente do preset, pois sua única função é ocultar legendas pré-existentes
+  // do vídeo original, não é um elemento estético.
+  const coverColour = hexToAss('#000000', 0.6);
+  const coverPxX = Math.round((box.x / 100) * playW);
+  const coverPxY = Math.round((box.y / 100) * playH);
+  const coverPxW = Math.round((box.w / 100) * playW);
+  const coverPxH = Math.round((box.h / 100) * playH);
+
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${playW}
@@ -190,6 +216,7 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,${fontName},${scaledFontSize},${primaryAss},${secondaryAss},${outlineAss},${backColourFinal},${isBold},0,0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},${alignment},${marginL},${marginR},${marginV},1
+Style: CoverBox,Arial,10,${coverColour},&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -246,17 +273,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         prevEnd = w.end;
       }
       // CORREÇÃO 3: Margem correta no Karaoke
-      lines.push(`Dialogue: 0,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
+      // Layer 1: fica acima da caixa de cobertura (Layer 0)
+      lines.push(`Dialogue: 1,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
     }
     return lines;
   };
 
+  // Uma linha de cobertura por legenda original (não por "chunk" de palavra do preset
+  // viral), cobrindo o intervalo inteiro sub.start–sub.end. Sempre no Layer 0, sempre
+  // presente, independente do preset escolhido.
+  const buildCoverLine = (sub: any): string =>
+    `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},CoverBox,,0,0,0,,{\\an7\\pos(${coverPxX},${coverPxY})\\p1}m 0 0 l ${coverPxW} 0 l ${coverPxW} ${coverPxH} l 0 ${coverPxH}{\\p0}`;
+
   const events = subtitles
     .flatMap(sub => {
-      if (style.preset === 'viral') return buildKaraokeLines(sub);
+      const coverLine = buildCoverLine(sub);
+      if (style.preset === 'viral') return [coverLine, ...buildKaraokeLines(sub)];
       const text = formatEmphasis(sub.text);
       // CORREÇÃO 4: Margem correta na legenda normal
-      return [`Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${text}`];
+      // Layer 1: fica acima da caixa de cobertura (Layer 0)
+      return [coverLine, `Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${text}`];
     })
     .join('\n');
 
