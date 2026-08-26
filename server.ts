@@ -125,13 +125,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const emphasisBigSize = Math.round(scaledFontSize * 2.4);
   const emphasisSmallSize = Math.max(6, Math.round(scaledFontSize * 0.8));
+  // FIX: as tags do .ass precisam de UMA barra invertida literal no arquivo final
+  // (\b, \fs, \k, \an, \pos, \p1, \p0). Dentro de uma template string do JS, uma
+  // barra invertida simples é interpretada como caractere de controle ou é
+  // silenciosamente descartada (\b = backspace, \f = form feed, \a e \p não são
+  // escapes válidos em JS e perdem a barra). Por isso agora usamos \\ (barra dupla
+  // no código-fonte) em toda tag — assim o JS produz uma barra simples de verdade
+  // na string final, que é o que o libass/ffmpeg espera.
   const formatEmphasis = (text: string): string => {
     if (!text.includes('**')) return text;
     return text.split(/(\*\*[^*]+\*\*)/).map(part => {
       if (part.startsWith('**') && part.endsWith('**')) {
-        return `{\b1\fs${emphasisBigSize}}${part.slice(2,-2)}{\b0\fs${scaledFontSize}}`;
+        return `{\\b1\\fs${emphasisBigSize}}${part.slice(2,-2)}{\\b0\\fs${scaledFontSize}}`;
       }
-      return part ? `{\fs${emphasisSmallSize}}${part}` : part;
+      return part ? `{\\fs${emphasisSmallSize}}${part}` : part;
     }).join('');
   };
 
@@ -156,7 +163,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       let prevEnd = chunkStart, text = '';
       for (const w of chunk) {
         const durCs = Math.max(1, Math.round((w.end - prevEnd) * 100));
-        text += `{\k${durCs}}${String(w.word).trim().toUpperCase()} `;
+        text += `{\\k${durCs}}${String(w.word).trim().toUpperCase()} `;
         prevEnd = w.end;
       }
       lines.push(`Dialogue: 1,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
@@ -165,9 +172,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   };
 
   const buildCoverLine = (sub: any): string =>
-    `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},CoverBox,,0,0,0,,{\an7\pos(${coverPxX},${coverPxY})\p1}m 0 0 l ${coverPxW} 0 l ${coverPxW} ${coverPxH} l 0 ${coverPxH}{\p0}`;
+    `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},CoverBox,,0,0,0,,{\\an7\\pos(${coverPxX},${coverPxY})\\p1}m 0 0 l ${coverPxW} 0 l ${coverPxW} ${coverPxH} l 0 ${coverPxH}{\\p0}`;
 
-  const events = subtitles.flatMap(sub => {
+  const events = subtitles.flatMap(rawSub => {
+    // FIX: o formato .ass exige que cada legenda seja UMA linha física no arquivo.
+    // Se o texto tiver uma quebra de linha (\n) — vinda da tradução da IA ou de
+    // edição manual no editor — ela corta o Dialogue no meio e o ffmpeg/libass só
+    // renderiza a parte antes da quebra, cortando o resto da legenda. Sanitizamos
+    // aqui trocando qualquer quebra de linha por espaço, garantindo uma linha só.
+    const sub = { ...rawSub, text: String(rawSub.text).replace(/\r\n|\r|\n/g, ' ').replace(/\s+/g, ' ').trim() };
     const coverLine = buildCoverLine(sub);
     if (style.preset === 'viral') return [coverLine, ...buildKaraokeLines(sub)];
     return [coverLine, `Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${formatEmphasis(sub.text)}`];
