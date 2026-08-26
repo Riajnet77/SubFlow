@@ -64,7 +64,8 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(cors());
+  const frontendUrl = process.env.FRONTEND_URL;
+app.use(cors(frontendUrl ? { origin: frontendUrl } : {}));
   app.use(express.json({ limit: "10mb" }));
 
   // ─── /api/transcribe ──────────────────────────────────────────────────────────
@@ -120,37 +121,111 @@ async function startServer() {
         confidence: seg.avg_logprob ? Math.min(0.99, Math.max(0.50, Math.exp(seg.avg_logprob))) : 0.85,
       }));
 
-      // 4. Optional: translate to target language using Groq LLM (free)
+      // 4. Optional: translate to target language using Groq LLM
       if (targetLang && targetLang.toLowerCase() !== "original" && subtitles.length > 0) {
-        console.log(`[transcribe] Translating to ${targetLang}…`);
-        const texts = subtitles.map((s) => s.text);
+        console.log(`[transcribe] Translating ${subtitles.length} lines to ${targetLang}…`);
 
-        const chatResponse = await groq.chat.completions.create({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "system",
-              content: `You are a professional subtitle translator. Translate each subtitle line to ${targetLang}. Preserve line breaks. Return ONLY a JSON array of translated strings, same order and count as input. No explanation.`,
-            },
-            {
-              role: "user",
-              content: JSON.stringify(texts),
-            },
-          ],
-          temperature: 0.2,
-          max_tokens: 4096,
-        });
+        const BATCH_SIZE = 10;
+        const translationMap = new Map<number, string>();
 
-        try {
-          const raw = chatResponse.choices[0].message.content ?? "[]";
-          const cleaned = raw.replace(/```json|```/g, "").trim();
-          const translated: string[] = JSON.parse(cleaned);
-          if (Array.isArray(translated) && translated.length === subtitles.length) {
-            subtitles = subtitles.map((s, i) => ({ ...s, text: translated[i] ?? s.text }));
+        const parseTranslationResponse = (raw: string): Map<number, string> => {
+          const map = new Map<number, string>();
+          let cleaned = raw
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
+            .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+            .replace(/<[^>]+>/g, '');
+          for (const line of cleaned.split('\n')) {
+            const match = line.match(/^\s*(\d+)[\.\s]*\|\|\|\s*(.+?)\s*$/);
+            if (match) {
+              const idx = parseInt(match[1], 10);
+              const text = match[2].trim();
+              if (text && !isNaN(idx)) map.set(idx, text);
+            }
+            const fallbackMatch = line.match(/^\s*(\d+)[\.)]\s+(.+?)\s*$/);
+            if (fallbackMatch && !match) {
+              const idx = parseInt(fallbackMatch[1], 10);
+              const text = fallbackMatch[2].trim();
+              if (text && !isNaN(idx)) map.set(idx, text);
+            }
           }
-        } catch (e) {
-          console.warn("[transcribe] Translation parse failed, keeping original text.");
+          return map;
+        };
+
+        const translateBatch = async (batch: typeof subtitles, offset: number, modelName: string) => {
+          const numbered = batch.map((s, i) => `${offset + i + 1}|||${s.text}`).join('\n');
+          console.log(`[transcribe] Batch ${offset}-${offset + batch.length - 1} → ${modelName}`);
+
+          const chat = await groq.chat.completions.create({
+            model: modelName,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert subtitle translator. Translate each line to ${targetLang}.
+CRITICAL: Output MUST be in ${targetLang}. Never output in English unless translating to English.
+Rules:
+- Keep the format: NUMBER|||TRANSLATION (exactly three pipes)
+- Keep translations CONCISE — same length or shorter than original
+- Never add explanations, notes, or markdown
+- Return ONLY the numbered lines, nothing else
+Example:
+1|||Olá mundo
+2|||Como vai você`,
+              },
+              { role: 'user', content: numbered },
+            ],
+            temperature: 0.1,
+            max_tokens: 8192,
+            include_reasoning: false,
+          });
+
+          const raw = chat.choices[0]?.message?.content ?? '';
+          console.log(`[transcribe] Raw response length: ${raw.length} chars`);
+          if (raw.length < 10) console.log(`[transcribe] Raw: ${raw}`);
+
+          return parseTranslationResponse(raw);
+        };
+
+        const primaryModel = 'openai/gpt-oss-120b';
+        const fallbackModel = 'llama-3.3-70b-versatile';
+
+        for (let i = 0; i < subtitles.length; i += BATCH_SIZE) {
+          const batch = subtitles.slice(i, i + BATCH_SIZE);
+          let batchMap: Map<number, string> | null = null;
+
+          try {
+            batchMap = await translateBatch(batch, i, primaryModel);
+          } catch (e: any) {
+            console.warn(`[transcribe] Primary model failed:`, e.message);
+          }
+
+          if (!batchMap || batchMap.size === 0) {
+            try {
+              batchMap = await translateBatch(batch, i, fallbackModel);
+            } catch (e: any) {
+              console.warn(`[transcribe] Fallback model failed:`, e.message);
+            }
+          }
+
+          if (batchMap) {
+            for (const [key, value] of batchMap) {
+              translationMap.set(key, value);
+            }
+          } else {
+            console.warn(`[transcribe] Batch ${i} completely failed, keeping original`);
+          }
+
+          if (i + BATCH_SIZE < subtitles.length) {
+            await new Promise(r => setTimeout(r, 500));
+          }
         }
+
+        const beforeCount = translationMap.size;
+        subtitles = subtitles.map((s, i) => ({
+          ...s,
+          text: translationMap.get(i + 1) ?? s.text,
+        }));
+        console.log(`[transcribe] Translation done: ${beforeCount}/${subtitles.length} lines translated`);
       }
 
       res.json({ subtitles });

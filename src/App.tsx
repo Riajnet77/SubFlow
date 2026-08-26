@@ -11,6 +11,8 @@ interface Subtitle {
 
 type Step = "upload" | "processing" | "edit" | "export";
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const LANGUAGES = [
   { code: "original", label: "Original language (no translation)" },
   { code: "English", label: "English" },
@@ -215,7 +217,7 @@ function ExportPanel({
   const [renderDone, setRenderDone] = useState(false);
 
   const downloadSrt = () => {
-    fetch("/api/export/srt", {
+    fetch(`${API_BASE}/api/export/srt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subtitles }),
@@ -232,7 +234,7 @@ function ExportPanel({
   };
 
   const downloadVtt = () => {
-    fetch("/api/export/vtt", {
+    fetch(`${API_BASE}/api/export/vtt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subtitles }),
@@ -256,7 +258,7 @@ function ExportPanel({
       const form = new FormData();
       form.append("video", videoFile);
       form.append("subtitles", JSON.stringify(subtitles));
-      const res = await fetch("/api/render", { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/api/render`, { method: "POST", body: form });
       if (!res.ok) throw new Error("Render failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -340,7 +342,7 @@ export default function App() {
       form.append("video", videoFile);
       form.append("targetLang", targetLang);
 
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/api/transcribe`, { method: "POST", body: form });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
