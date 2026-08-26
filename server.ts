@@ -557,62 +557,116 @@ async function startServer() {
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${fullLangName}...`);
 
-        const BATCH_SIZE = 15;
+        const BATCH_SIZE = 10; // reduzido de 15 para evitar truncamento
         const translationMap = new Map<number, string>();
 
-        const translateBatch = async (batchSegments: typeof segments, offset: number) => {
+        const parseTranslationResponse = (raw: string): Map<number, string> => {
+          const map = new Map<number, string>();
+          // Remove blocos markdown, thinking tags e tags XML
+          let cleaned = raw
+            .replace(/```[\s\S]*?```/g, '') // remove blocos de código
+            .replace(/<think>[\s\S]*?<\/think>/gi, '') // remove thinking tags
+            .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+            .replace(/<[^>]+>/g, ''); // remove outras tags XML
+
+          for (const line of cleaned.split('\n')) {
+            // Regex mais flexível: permite espaços, pontos, e variações no separador
+            const match = line.match(/^\s*(\d+)[\.\s]*\|\|\|\s*(.+?)\s*$/);
+            if (match) {
+              const idx = parseInt(match[1], 10);
+              const text = match[2].trim();
+              if (text && !isNaN(idx)) map.set(idx, text);
+            }
+            // Fallback: detecta formato "N. texto" ou "N) texto"
+            const fallbackMatch = line.match(/^\s*(\d+)[\.\)]\s+(.+?)\s*$/);
+            if (fallbackMatch && !match) {
+              const idx = parseInt(fallbackMatch[1], 10);
+              const text = fallbackMatch[2].trim();
+              if (text && !isNaN(idx)) map.set(idx, text);
+            }
+          }
+          return map;
+        };
+
+        const translateBatch = async (batchSegments: typeof segments, offset: number, modelName: string) => {
           const numbered = batchSegments.map((s, i) => `${offset + i + 1}|||${s.text}`).join('\n');
+          console.log(`[transcribe ${id}] Batch ${offset}-${offset + batchSegments.length - 1} → ${modelName}`);
+
           const chat = await groq.chat.completions.create({
-            model: 'openai/gpt-oss-120b',
+            model: modelName,
             messages: [
               {
                 role: 'system',
-                content: `You are an expert translator. Translate each subtitle line to ${fullLangName}.
-CRITICAL RULE: The final output MUST be in ${fullLangName}. Do NOT output in English unless ${fullLangName} is English.
+                content: `You are an expert subtitle translator. Translate each line to ${fullLangName}.
+CRITICAL: Output MUST be in ${fullLangName}. Never output in English unless translating to English.
 Rules:
-- Each line starts with a number and ||| separator. Keep the exact same format.
-- Keep translations CONCISE — same length or shorter than the original. Use natural contractions.
-- Never add words not in the original. Prioritize brevity over literal accuracy.
-- Return ONLY the translated lines with their numbers, nothing else.
+- Keep the format: NUMBER|||TRANSLATION (exactly three pipes, no spaces around pipes)
+- Keep translations CONCISE — same length or shorter than original
+- Never add explanations, notes, or markdown
+- Return ONLY the numbered lines, nothing else
 Example:
-Input:  1|||Hello world
-        2|||How are you doing today
-Output: 1|||Olá mundo
-        2|||Como vai você`,
+1|||Olá mundo
+2|||Como vai você`,
               },
               { role: 'user', content: numbered },
             ],
             temperature: 0.1,
-            max_tokens: 4096,
+            max_tokens: 8192, // aumentado para evitar truncamento
+            include_reasoning: false, // evita thinking content no output
           });
+
           const raw = chat.choices[0]?.message?.content ?? '';
-          for (const line of raw.split('\n')) {
-            const match = line.match(/^(\d+)\|\|\|(.+)$/);
-            if (match) translationMap.set(parseInt(match[1]), match[2].trim());
-          }
+          console.log(`[transcribe ${id}] Raw response length: ${raw.length} chars`);
+          if (raw.length < 10) console.log(`[transcribe ${id}] Raw: ${raw}`);
+
+          return parseTranslationResponse(raw);
         };
+
+        // Tenta primeiro com gpt-oss-120b, fallback para llama-3.3-70b se falhar
+        const primaryModel = 'openai/gpt-oss-120b';
+        const fallbackModel = 'llama-3.3-70b-versatile';
 
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
           const batch = segments.slice(i, i + BATCH_SIZE);
-          let success = false;
-          for (let attempt = 1; attempt <= 2; attempt++) {
+          let batchMap: Map<number, string> | null = null;
+
+          // Tentativa 1: modelo primário
+          try {
+            batchMap = await translateBatch(batch, i, primaryModel);
+          } catch (e: any) {
+            console.warn(`[transcribe ${id}] Primary model failed:`, e.message);
+          }
+
+          // Tentativa 2: fallback
+          if (!batchMap || batchMap.size === 0) {
             try {
-              await translateBatch(batch, i);
-              success = true;
-              break;
-            } catch (e) {
-              console.warn(`[transcribe ${id}] Batch ${i} attempt ${attempt} failed:`, e);
-              if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+              batchMap = await translateBatch(batch, i, fallbackModel);
+            } catch (e: any) {
+              console.warn(`[transcribe ${id}] Fallback model failed:`, e.message);
             }
           }
-          if (!success) console.warn(`[transcribe ${id}] Batch ${i} failed after retries, keeping original`);
+
+          // Mescla no map global
+          if (batchMap) {
+            for (const [key, value] of batchMap) {
+              translationMap.set(key, value);
+            }
+          } else {
+            console.warn(`[transcribe ${id}] Batch ${i} completely failed, keeping original`);
+          }
+
+          // Pequeno delay entre batches para não bater rate limit
+          if (i + BATCH_SIZE < segments.length) {
+            await new Promise(r => setTimeout(r, 500));
+          }
         }
 
+        const beforeCount = translationMap.size;
         segments = segments.map((s, i) => ({
           ...s,
           text: translationMap.get(i + 1) ?? s.text,
         }));
-        console.log(`[transcribe ${id}] Translation OK: got ${translationMap.size} of ${segments.length}`);
+        console.log(`[transcribe ${id}] Translation done: ${beforeCount}/${segments.length} lines translated`);
       }
 
       const MAX_CHARS = 42;
