@@ -10,6 +10,8 @@ interface SubStyle {
 interface CustomPreset extends Partial<SubStyle> { label: string; emoji: string; }
 type Step = "upload" | "processing" | "edit" | "export";
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const LANGUAGES = [
   { code: "original", label: "Original (no translation)" },
   { code: "en", label: "🇺🇸 English" },
@@ -289,7 +291,7 @@ function RightPanel({ style, onChange, subtitles, onSubChange, currentTime, cust
     onChange({ ...style, ...preset, preset: k });
     // When selecting emphasis, apply AI word emphasis to subtitles
     if (k === 'emphasis' && subtitles.length > 0) {
-      fetch('/api/emphasis', {
+      fetch(`${API_BASE}/api/emphasis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subtitles: stripEmphasisTags(subtitles) }),
@@ -426,7 +428,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
       form.append("style", JSON.stringify({ ...style, browserW: nativeW, browserH, nativeW, nativeH, fontScale }));
 
       // Step 1: submit job — returns immediately with jobId
-      const res = await fetch("/api/render", { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/api/render`, { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       const { jobId } = await res.json();
 
@@ -434,7 +436,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
       await new Promise<void>((resolve, reject) => {
         const interval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`/api/render/${jobId}/status`);
+            const statusRes = await fetch(`${API_BASE}/api/render/${jobId}/status`);
             const { status, error } = await statusRes.json();
             if (status === 'done') {
               clearInterval(interval);
@@ -451,7 +453,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
       });
 
       // Step 3: download
-      dl(`/api/render/${jobId}/download`, "subflow_export.mp4");
+      dl(`${API_BASE}/api/render/${jobId}/download`, "subflow_export.mp4");
       setDone(true);
     } catch (e: any) {
       alert("Render failed: " + (e?.message ?? e));
@@ -465,8 +467,8 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
       <h3>Export</h3>
       <p className="export-sub">Choose your output format</p>
       <div className="export-grid">
-        <button className="export-card" onClick={() => post("/api/export/srt", "subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
-        <button className="export-card" onClick={() => post("/api/export/vtt", "subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
+        <button className="export-card" onClick={() => post(`${API_BASE}/api/export/srt`, "subtitles.srt")}><span className="ei">📄</span><span className="el">SRT File</span><span className="ed">Most video players</span></button>
+        <button className="export-card" onClick={() => post(`${API_BASE}/api/export/vtt`, "subtitles.vtt")}><span className="ei">🌐</span><span className="el">WebVTT</span><span className="ed">Web players</span></button>
         <CopyButton subtitles={subtitles} />
         <button
           className={`export-card accent ${rendering ? "loading" : ""} ${done ? "done" : ""}`}
@@ -576,7 +578,7 @@ export default function App() {
     if (!videoFile) return; setStep("processing"); setError(null);
     try {
       const form = new FormData(); form.append("video", videoFile); form.append("targetLang", targetLang);
-      const res = await fetch("/api/transcribe", { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/api/transcribe`, { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Transcription failed.");
       setSubtitles(data.subtitles); setOriginalSubtitles(data.subtitles); setStep("edit");
