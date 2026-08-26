@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import cors from 'cors';
 import multer from 'multer';
 import ffmpeg from 'fluent-ffmpeg';
@@ -303,7 +302,10 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(cors());
+  // FRONTEND_URL: URL do Static Site do frontend no Render (ex: https://subflow.onrender.com).
+  // Em dev local, sem essa env var, libera qualquer origem.
+  const frontendUrl = process.env.FRONTEND_URL;
+  app.use(cors(frontendUrl ? { origin: frontendUrl } : {}));
   app.use(express.json());
 
   type JobStatus = 'processing' | 'done' | 'error';
@@ -727,17 +729,9 @@ Output: 1|||you need to find the **demand**`,
     res.send(vtt);
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
-  }
+  // Backend agora é uma API pura — o frontend (Vite/React) roda como um
+  // Static Site separado no Render e fala com essa API via FRONTEND_URL/CORS
+  // acima, então não servimos mais HTML/estáticos por aqui.
 
   app.use((req, res, next) => {
     if (req.path === '/api/render') {
