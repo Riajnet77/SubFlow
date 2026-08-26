@@ -523,7 +523,7 @@ async function startServer() {
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${fullLangName}...`);
 
-        const BATCH_SIZE = 10;
+        const BATCH_SIZE = 3;
         const translationMap = new Map<number, string>();
 
         const parseTranslationResponse = (raw: string): Map<number, string> => {
@@ -585,7 +585,7 @@ Example:
         };
 
         const primaryModel = 'openai/gpt-oss-120b';
-        const fallbackModel = 'llama-3.3-70b-versatile';
+        const fallbackModel = 'openai/gpt-oss-20b';
 
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
           const batch = segments.slice(i, i + BATCH_SIZE);
