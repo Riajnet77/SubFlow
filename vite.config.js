@@ -2,7 +2,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react()],
@@ -14,9 +14,16 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(process.cwd(), '.'),
       },
     },
-    server: {
-      hmr: process.env.DISABLE_HMR !== 'true',
-    },
+    // server.hmr só é usado pelo `vite dev` (modo serve). Deixamos ele fora do
+    // objeto de config quando estamos rodando `vite build` (command === 'build'),
+    // já que sua mera presença pode acionar inicialização de watcher do Rollup
+    // mesmo num build de produção único, o que não é necessário e pode causar
+    // problemas de resolução de módulo em certos ambientes Linux.
+    ...(command === 'serve' ? {
+      server: {
+        hmr: process.env.DISABLE_HMR !== 'true',
+      },
+    } : {}),
     build: {
       rollupOptions: {
         external: ['fsevents'],
