@@ -357,8 +357,8 @@ async function startServer() {
           return parseTranslationResponse(raw);
         };
 
-        const primaryModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
-        const fallbackModel = 'llama-3.1-8b-instant';
+        const primaryModel = 'groq/compound';
+        const fallbackModel = 'qwen/qwen3.6-27b';
 
         for (let i = 0; i < segments.length; i += BATCH_SIZE) {
           const batch = segments.slice(i, i + BATCH_SIZE);
