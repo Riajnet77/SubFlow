@@ -523,7 +523,7 @@ async function startServer() {
       if (targetLang !== 'original' && segments.length > 0) {
         console.log(`[transcribe ${id}] Translating ${segments.length} segments to ${fullLangName}...`);
 
-        const BATCH_SIZE = 3;
+        const BATCH_SIZE = 1;
         const translationMap = new Map<number, string>();
 
         const parseTranslationResponse = (raw: string): Map<number, string> => {
@@ -614,7 +614,7 @@ Example:
           }
 
           if (i + BATCH_SIZE < segments.length) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 2000));
           }
         }
 
