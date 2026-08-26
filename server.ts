@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import multer from "multer";
 import ffmpeg from "fluent-ffmpeg";
@@ -341,21 +340,10 @@ Example:
     }
   });
 
-  // ─── Vite / static serving ────────────────────────────────────────────────────
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    // Only catch non-API routes for SPA fallback
-    app.get(/^(?!\/api\/).*$/, (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
+  // ─── Health check ────────────────────────────────────────────────────────────
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`\n🎬 SubFlow running → http://localhost:${PORT}\n`);
