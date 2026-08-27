@@ -101,12 +101,6 @@ function buildAss(subtitles: any[], style: any): string {
     return `${h}:${String(m).padStart(2, '0')}:${sec}`;
   };
 
-  const coverColour = hexToAss('#000000', 0.6);
-  const coverPxX = Math.round((box.x / 100) * playW);
-  const coverPxY = Math.round((box.y / 100) * playH);
-  const coverPxW = Math.round((box.w / 100) * playW);
-  const coverPxH = Math.round((box.h / 100) * playH);
-
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${playW}
@@ -117,7 +111,6 @@ WrapStyle: ${bgOpacity > 0 ? 0 : 1}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,${fontName},${scaledFontSize},${primaryAss},&H00FFFFFF,${outlineAss},${backColourFinal},${isBold},0,0,0,100,100,0,0,${borderStyle},${outlineWidth},${shadowDepth},2,${marginL},${marginR},${marginV},1
-Style: CoverBox,Arial,10,${coverColour},&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -222,6 +215,11 @@ async function startServer() {
     (async () => {
       try {
         const assContent = buildAss(subtitles, style);
+        console.log(`[render ${id}] Subtitles count: ${subtitles.length}`);
+        subtitles.forEach((s: any, i: number) => console.log(`[render ${id}] sub[${i}] text=${JSON.stringify(s.text)}`));
+        console.log(`[render ${id}] ---- ASS CONTENT START ----`);
+        console.log(assContent);
+        console.log(`[render ${id}] ---- ASS CONTENT END ----`);
         fs.writeFileSync(assPath, assContent, 'utf8');
         const { spawn } = require('child_process');
         const ffmpegBinary = fs.existsSync(modernFfmpegPath) ? modernFfmpegPath : 'ffmpeg';
