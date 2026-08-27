@@ -164,9 +164,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return lines;
   };
 
-  const buildCoverLine = (sub: any): string =>
-    `Dialogue: 0,${assTime(sub.start)},${assTime(sub.end)},CoverBox,,0,0,0,,{\\an7\\pos(${coverPxX},${coverPxY})\\p1}m 0 0 l ${coverPxW} 0 l ${coverPxW} ${coverPxH} l 0 ${coverPxH}{\\p0}`;
-
   const events = subtitles.flatMap(rawSub => {
     // FIX: o formato .ass exige que cada legenda seja UMA linha física no arquivo.
     // Se o texto tiver uma quebra de linha (\n) — vinda da tradução da IA ou de
@@ -174,12 +171,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // renderiza a parte antes da quebra, cortando o resto da legenda. Sanitizamos
     // aqui trocando qualquer quebra de linha por espaço, garantindo uma linha só.
     const sub = { ...rawSub, text: String(rawSub.text).replace(/\r\n|\r|\n/g, ' ').replace(/\s+/g, ' ').trim() };
-    const coverLine = buildCoverLine(sub);
-    if (style.preset === 'viral') return [coverLine, ...buildKaraokeLines(sub)];
-    return [coverLine, `Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${formatEmphasis(sub.text)}`];
+    if (style.preset === 'viral') return buildKaraokeLines(sub);
+    return [`Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${formatEmphasis(sub.text)}`];
   }).join('\n');
 
   return header + events + '\n';
+
 }
 
 async function startServer() {
