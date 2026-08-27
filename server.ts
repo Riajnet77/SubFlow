@@ -220,12 +220,25 @@ async function startServer() {
         fs.writeFileSync(assPath, assContent, 'utf8');
         const { spawn } = require('child_process');
         const ffmpegBinary = fs.existsSync(modernFfmpegPath) ? modernFfmpegPath : 'ffmpeg';
+        console.log(`[render ${id}] ffmpeg binary: ${ffmpegBinary}`);
+        console.log(`[render ${id}] fontsDir (${fontsDir}) contents:`, fs.existsSync(fontsDir) ? fs.readdirSync(fontsDir) : 'NAO EXISTE');
+        console.log(`[render ${id}] homeFontsDir (${homeFontsDir}) contents:`, fs.existsSync(homeFontsDir) ? fs.readdirSync(homeFontsDir) : 'NAO EXISTE');
         const ffmpegArgs = ['-y','-i',inputPath,'-c:v','libx264','-preset','ultrafast','-crf','23','-threads','1','-tune','fastdecode','-vf',`ass=${assPath}`,'-c:a','copy','-sn','-movflags','+faststart','-f','mp4',outputPath];
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(ffmpegBinary, ffmpegArgs, { stdio: ['ignore','pipe','pipe'] });
           let stderr = '';
-          proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-          proc.on('close', (code: number) => { if (code === 0) resolve(); else reject(new Error(`ffmpeg exited ${code}`)); });
+          proc.stderr.on('data', (data: Buffer) => {
+            const line = data.toString();
+            stderr += line;
+            // Sempre loga linhas relevantes de fonte/aviso/erro, mesmo quando o
+            // ffmpeg termina com sucesso (exit code 0) — se a fonte não for
+            // encontrada, o libass pode falhar em desenhar o texto SEM quebrar
+            // o processo, e sem isso a falha fica invisível nos logs.
+            if (/font|warn|error|fontselect|fontconfig/i.test(line)) {
+              console.log(`[render ${id}] ffmpeg:`, line.trim());
+            }
+          });
+          proc.on('close', (code: number) => { if (code === 0) resolve(); else reject(new Error(`ffmpeg exited ${code}. stderr tail: ${stderr.slice(-800)}`)); });
           proc.on('error', reject);
         });
         jobs.set(id, { status: 'done', outputPath });
