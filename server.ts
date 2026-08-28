@@ -211,7 +211,57 @@ async function startServer() {
 
     (async () => {
       try {
-        const assContent = buildAss(subtitles, style);
+        // Detecta as dimensões REAIS do vídeo (como o ffmpeg vai decodificar, antes
+        // de qualquer rotação) via ffprobe, em vez de confiar cegamente no
+        // videoWidth/videoHeight que o navegador reportou. Vídeos gravados em
+        // celular no modo retrato costumam ser codificados como "paisagem" com uma
+        // tag de rotação de 90°/270° que o player aplica na exibição — se o filtro
+        // \`ass\` do ffmpeg desenhar usando as dimensões pós-rotação (as que o
+        // navegador vê) mas operar sobre o frame bruto pré-rotação, a legenda é
+        // posicionada fora da área visível e simplesmente não aparece.
+        const probeVideoDimensions = (videoPath: string): Promise<{ width: number; height: number; rotation: number }> =>
+          new Promise((resolve) => {
+            const { execFile } = require('child_process');
+            execFile('ffprobe', [
+              '-v', 'error',
+              '-select_streams', 'v:0',
+              '-show_entries', 'stream=width,height:stream_tags=rotate:side_data_list',
+              '-of', 'json',
+              videoPath,
+            ], (err: any, stdout: string) => {
+              if (err) { console.warn(`[render ${id}] ffprobe failed:`, err.message); return resolve({ width: 0, height: 0, rotation: 0 }); }
+              try {
+                const info = JSON.parse(stdout);
+                const stream = info.streams?.[0] ?? {};
+                const width = stream.width ?? 0;
+                const height = stream.height ?? 0;
+                let rotation = parseInt(stream.tags?.rotate ?? '0', 10) || 0;
+                const rotateSideData = (stream.side_data_list ?? []).find((sd: any) => typeof sd.rotation === 'number');
+                if (rotateSideData) rotation = Math.abs(rotateSideData.rotation) % 360;
+                resolve({ width, height, rotation });
+              } catch (e) {
+                console.warn(`[render ${id}] ffprobe parse failed:`, e);
+                resolve({ width: 0, height: 0, rotation: 0 });
+              }
+            });
+          });
+
+        const probed = await probeVideoDimensions(inputPath);
+        console.log(`[render ${id}] ffprobe raw stream: ${probed.width}x${probed.height} rotation=${probed.rotation}`);
+        console.log(`[render ${id}] style enviado pelo navegador: nativeW=${style.nativeW} nativeH=${style.nativeH}`);
+
+        // Se a rotação for de 90 ou 270 graus, o frame bruto que o filtro \`ass\`
+        // enxerga tem largura/altura TROCADAS em relação ao que aparece na tela
+        // depois de rotacionado. Ajustamos playW/playH pra bater com o frame bruto.
+        const isSideways = probed.rotation === 90 || probed.rotation === 270 || probed.rotation === -90 || probed.rotation === -270;
+        const effectiveStyle = { ...style };
+        if (probed.width > 0 && probed.height > 0) {
+          effectiveStyle.nativeW = isSideways ? probed.height : probed.width;
+          effectiveStyle.nativeH = isSideways ? probed.width : probed.height;
+          console.log(`[render ${id}] PlayRes ajustado pra: ${effectiveStyle.nativeW}x${effectiveStyle.nativeH} (isSideways=${isSideways})`);
+        }
+
+        const assContent = buildAss(subtitles, effectiveStyle);
         console.log(`[render ${id}] Subtitles count: ${subtitles.length}`);
         subtitles.forEach((s: any, i: number) => console.log(`[render ${id}] sub[${i}] text=${JSON.stringify(s.text)}`));
         console.log(`[render ${id}] ---- ASS CONTENT START ----`);
@@ -223,22 +273,25 @@ async function startServer() {
         console.log(`[render ${id}] ffmpeg binary: ${ffmpegBinary}`);
         console.log(`[render ${id}] fontsDir (${fontsDir}) contents:`, fs.existsSync(fontsDir) ? fs.readdirSync(fontsDir) : 'NAO EXISTE');
         console.log(`[render ${id}] homeFontsDir (${homeFontsDir}) contents:`, fs.existsSync(homeFontsDir) ? fs.readdirSync(homeFontsDir) : 'NAO EXISTE');
-        const ffmpegArgs = ['-y','-i',inputPath,'-c:v','libx264','-preset','ultrafast','-crf','23','-threads','1','-tune','fastdecode','-vf',`ass=${assPath}`,'-c:a','copy','-sn','-movflags','+faststart','-f','mp4',outputPath];
+        // FIX: vídeos exportados de apps de legenda (CapCut e afins) às vezes têm mais
+        // de uma "stream de vídeo" no MP4 (ex: uma imagem de capa/thumbnail embutida
+        // além do vídeo real). Sem -map explícito, o ffmpeg pode aplicar o filtro -vf
+        // numa stream mas mandar OUTRA pro arquivo final — sem erro nenhum, só
+        // silenciosamente sem queimar a legenda. Forçamos aqui a primeira stream de
+        // vídeo (0:v:0) e a primeira de áudio (0:a:0, opcional com "?").
+        const ffmpegArgs = ['-y','-i',inputPath,'-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','23','-threads','1','-tune','fastdecode','-vf',`ass=${assPath}`,'-c:a','copy','-sn','-movflags','+faststart','-f','mp4',outputPath];
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(ffmpegBinary, ffmpegArgs, { stdio: ['ignore','pipe','pipe'] });
           let stderr = '';
           proc.stderr.on('data', (data: Buffer) => {
             const line = data.toString();
             stderr += line;
-            // Sempre loga linhas relevantes de fonte/aviso/erro, mesmo quando o
-            // ffmpeg termina com sucesso (exit code 0) — se a fonte não for
-            // encontrada, o libass pode falhar em desenhar o texto SEM quebrar
-            // o processo, e sem isso a falha fica invisível nos logs.
-            if (/font|warn|error|fontselect|fontconfig/i.test(line)) {
-              console.log(`[render ${id}] ffmpeg:`, line.trim());
-            }
+            console.log(`[render ${id}] ffmpeg:`, line.trim());
           });
-          proc.on('close', (code: number) => { if (code === 0) resolve(); else reject(new Error(`ffmpeg exited ${code}. stderr tail: ${stderr.slice(-800)}`)); });
+          proc.on('close', (code: number) => {
+            console.log(`[render ${id}] ffmpeg process closed with code ${code}`);
+            if (code === 0) resolve(); else reject(new Error(`ffmpeg exited ${code}. stderr tail: ${stderr.slice(-800)}`));
+          });
           proc.on('error', reject);
         });
         jobs.set(id, { status: 'done', outputPath });
