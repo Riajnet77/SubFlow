@@ -219,35 +219,68 @@ async function startServer() {
         // \`ass\` do ffmpeg desenhar usando as dimensões pós-rotação (as que o
         // navegador vê) mas operar sobre o frame bruto pré-rotação, a legenda é
         // posicionada fora da área visível e simplesmente não aparece.
-        const probeVideoDimensions = (videoPath: string): Promise<{ width: number; height: number; rotation: number }> =>
+        // Detecta as dimensões REAIS do vídeo (como o ffmpeg vai decodificar, antes
+        // de qualquer rotação) via ffprobe, em vez de confiar cegamente no
+        // videoWidth/videoHeight que o navegador reportou. Vídeos gravados em
+        // celular no modo retrato costumam ser codificados como "paisagem" com uma
+        // tag de rotação de 90°/270° que o player aplica na exibição — se o filtro
+        // `ass` do ffmpeg desenhar usando as dimensões pós-rotação (as que o
+        // navegador vê) mas operar sobre o frame bruto pré-rotação, a legenda é
+        // posicionada fora da área visível e simplesmente não aparece.
+        //
+        // FIX: além disso, vídeos exportados de apps de legendagem (CapCut e afins)
+        // frequentemente têm MAIS DE UMA stream de vídeo no MP4 — normalmente uma
+        // imagem de capa/thumbnail (disposition "attached_pic") além do vídeo real.
+        // A seleção antiga (`-select_streams v:0`) sempre pegava a PRIMEIRA stream
+        // de vídeo, que pode muito bem ser essa thumbnail — o filtro `ass` seria
+        // aplicado nela (um frame único) e a legenda nunca apareceria no vídeo de
+        // verdade. Agora inspecionamos TODAS as streams de vídeo e escolhemos
+        // explicitamente a real (attached_pic=0, maior duração).
+        const probeVideoStreams = (videoPath: string): Promise<{ index: number; width: number; height: number; rotation: number }> =>
           new Promise((resolve) => {
             const { execFile } = require('child_process');
             execFile('ffprobe', [
               '-v', 'error',
-              '-select_streams', 'v:0',
-              '-show_entries', 'stream=width,height:stream_tags=rotate:side_data_list',
+              '-select_streams', 'v',
+              '-show_entries', 'stream=index,width,height,duration:stream_tags=rotate:stream_disposition=attached_pic:side_data_list',
               '-of', 'json',
               videoPath,
             ], (err: any, stdout: string) => {
-              if (err) { console.warn(`[render ${id}] ffprobe failed:`, err.message); return resolve({ width: 0, height: 0, rotation: 0 }); }
+              if (err) { console.warn(`[render ${id}] ffprobe failed:`, err.message); return resolve({ index: 0, width: 0, height: 0, rotation: 0 }); }
               try {
                 const info = JSON.parse(stdout);
-                const stream = info.streams?.[0] ?? {};
-                const width = stream.width ?? 0;
-                const height = stream.height ?? 0;
-                let rotation = parseInt(stream.tags?.rotate ?? '0', 10) || 0;
-                const rotateSideData = (stream.side_data_list ?? []).find((sd: any) => typeof sd.rotation === 'number');
+                const streams: any[] = info.streams ?? [];
+                console.log(`[render ${id}] ffprobe encontrou ${streams.length} stream(s) de vídeo:`, streams.map(s => ({ index: s.index, w: s.width, h: s.height, duration: s.duration, attached_pic: s.disposition?.attached_pic })));
+                // Prioriza streams que NÃO são thumbnail (attached_pic=0); entre essas,
+                // pega a de maior duração informada (a "real"). Se nenhuma tiver
+                // duration, cai pra primeira não-attached_pic; se todas forem
+                // attached_pic (caso raro), usa a primeira mesmo.
+                const real = streams.filter(s => !s.disposition?.attached_pic);
+                const candidates = real.length > 0 ? real : streams;
+                const chosen = candidates.reduce((best, s) => {
+                  const bestDur = parseFloat(best?.duration ?? '0') || 0;
+                  const curDur = parseFloat(s.duration ?? '0') || 0;
+                  return curDur > bestDur ? s : (best ?? s);
+                }, candidates[0]);
+                const width = chosen?.width ?? 0;
+                const height = chosen?.height ?? 0;
+                let rotation = parseInt(chosen?.tags?.rotate ?? '0', 10) || 0;
+                const rotateSideData = (chosen?.side_data_list ?? []).find((sd: any) => typeof sd.rotation === 'number');
                 if (rotateSideData) rotation = Math.abs(rotateSideData.rotation) % 360;
-                resolve({ width, height, rotation });
+                // O "index" do stream escolhido é a posição dele DENTRO das streams de
+                // vídeo (0ª, 1ª, ...), que é o que o seletor -map 0:v:N do ffmpeg espera
+                // — não o índice global do container.
+                const videoOnlyIndex = streams.indexOf(chosen);
+                resolve({ index: videoOnlyIndex >= 0 ? videoOnlyIndex : 0, width, height, rotation });
               } catch (e) {
                 console.warn(`[render ${id}] ffprobe parse failed:`, e);
-                resolve({ width: 0, height: 0, rotation: 0 });
+                resolve({ index: 0, width: 0, height: 0, rotation: 0 });
               }
             });
           });
 
-        const probed = await probeVideoDimensions(inputPath);
-        console.log(`[render ${id}] ffprobe raw stream: ${probed.width}x${probed.height} rotation=${probed.rotation}`);
+        const probed = await probeVideoStreams(inputPath);
+        console.log(`[render ${id}] Stream de vídeo real escolhida: index 0:v:${probed.index}, ${probed.width}x${probed.height}, rotation=${probed.rotation}`);
         console.log(`[render ${id}] style enviado pelo navegador: nativeW=${style.nativeW} nativeH=${style.nativeH}`);
 
         // Se a rotação for de 90 ou 270 graus, o frame bruto que o filtro \`ass\`
@@ -273,13 +306,35 @@ async function startServer() {
         console.log(`[render ${id}] ffmpeg binary: ${ffmpegBinary}`);
         console.log(`[render ${id}] fontsDir (${fontsDir}) contents:`, fs.existsSync(fontsDir) ? fs.readdirSync(fontsDir) : 'NAO EXISTE');
         console.log(`[render ${id}] homeFontsDir (${homeFontsDir}) contents:`, fs.existsSync(homeFontsDir) ? fs.readdirSync(homeFontsDir) : 'NAO EXISTE');
-        // FIX: vídeos exportados de apps de legenda (CapCut e afins) às vezes têm mais
-        // de uma "stream de vídeo" no MP4 (ex: uma imagem de capa/thumbnail embutida
-        // além do vídeo real). Sem -map explícito, o ffmpeg pode aplicar o filtro -vf
-        // numa stream mas mandar OUTRA pro arquivo final — sem erro nenhum, só
-        // silenciosamente sem queimar a legenda. Forçamos aqui a primeira stream de
-        // vídeo (0:v:0) e a primeira de áudio (0:a:0, opcional com "?").
-        const ffmpegArgs = ['-y','-i',inputPath,'-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','23','-threads','1','-tune','fastdecode','-vf',`ass=${assPath}`,'-c:a','copy','-sn','-movflags','+faststart','-f','mp4',outputPath];
+        // FIX: em vez de confiar em -map 0:v:0 (que pode pegar uma thumbnail/capa
+        // embutida no lugar do vídeo real) e -vf ass=... sozinho (que assume, sem
+        // garantir, que o frame já bate exatamente com o PlayResX/PlayResY do
+        // .ass), agora usamos -filter_complex explicitamente:
+        //   1. Seleciona a stream de vídeo REAL identificada pelo ffprobe acima
+        //      ([0:v:${probed.index}], não mais fixo em 0).
+        //   2. scale+pad força o frame pro exato tamanho que o .ass foi gerado
+        //      pra usar (effectiveStyle.nativeW/H) — elimina qualquer mismatch de
+        //      resolução/SAR entre o que o navegador viu e o que o ffmpeg decodifica.
+        //   3. setsar=1 normaliza pixels não-quadrados (comum em vídeo de rede
+        //      social), que pode fazer o libass calcular posição errada.
+        //   4. ass=... roda por último, já sobre um frame com dimensões garantidas.
+        // Áudio via aac (reencode) em vez de copy: copy pode falhar silenciosamente
+        // se o codec de áudio original não for compatível com o container mp4 de
+        // saída sem re-encode.
+        const targetW = effectiveStyle.nativeW || 1280;
+        const targetH = effectiveStyle.nativeH || 720;
+        const assPathEscaped = assPath.replace(/:/g, '\\:');
+        const filterComplex = `[0:v:${probed.index}]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,ass=${assPathEscaped}[v]`;
+        console.log(`[render ${id}] filter_complex: ${filterComplex}`);
+        const ffmpegArgs = [
+          '-y', '-i', inputPath,
+          '-filter_complex', filterComplex,
+          '-map', '[v]', '-map', '0:a:0?',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-threads', '1', '-tune', 'fastdecode',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '128k',
+          '-sn', '-movflags', '+faststart', '-f', 'mp4', outputPath,
+        ];
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(ffmpegBinary, ffmpegArgs, { stdio: ['ignore','pipe','pipe'] });
           let stderr = '';
