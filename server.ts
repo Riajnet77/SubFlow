@@ -372,7 +372,7 @@ async function startServer() {
     const job = jobs.get(req.params.id);
     if (!job || job.status !== 'done' || !job.outputPath) return res.status(404).json({ error: 'File not ready' });
     res.setHeader('Cache-Control', 'no-store');
-    res.download(job.outputPath, `subflow_export_${Date.now()}.mp4`, err => {
+    res.download(job.outputPath, `video-legendado-${Date.now()}.mp4`, err => {
       if (err) console.error(`[render ${req.params.id}] download error:`, err);
       try { fs.unlinkSync(job.outputPath!); } catch {}
       jobs.delete(req.params.id);
@@ -529,8 +529,36 @@ async function startServer() {
       }
 
       let subtitles = finalSegments.filter(s=>s.text.trim().length>0).map(s=>({start:s.start,end:s.end,text:s.text.trim(),confidence:0.9})) as Array<{start:number;end:number;text:string;confidence:number;words?:Array<{word:string;start:number;end:number}>}>;
+
+      // FIX: o Whisper às vezes transcreve um fragmento sozinho no finalzinho do
+      // áudio (uma palavra solta tipo "você"/"you", de um som cortado ou respiração
+      // captada como fala) — isso aparecia como uma legenda órfã depois da última
+      // frase de verdade. Remove o ÚLTIMO item da lista se ele for só UMA palavra
+      // (uma legenda real de verdade raramente termina o vídeo assim, isolada).
+      if (subtitles.length > 1) {
+        const last = subtitles[subtitles.length - 1];
+        const wordCount = last.text.trim().split(/\s+/).filter(Boolean).length;
+        if (wordCount <= 1) {
+          console.log(`[transcribe] Removendo fragmento orfao no final: "${last.text}"`);
+          subtitles = subtitles.slice(0, -1);
+        }
+      }
       if (targetLang === 'original' && words.length > 0) {
         for (const sub of subtitles) sub.words = words.filter(w => w.start >= sub.start - 0.05 && w.end <= sub.end + 0.15);
+      }
+
+      // FIX: o Whisper às vezes capta um resquício de fala/eco bem no final do áudio
+      // (comum quando o vídeo termina com uma tela de "inscreva-se"/créditos por cima
+      // de música ou fala baixa) e gera uma última legenda de UMA palavra só, sem
+      // sentido nenhum no contexto. Removemos legendas finais assim automaticamente —
+      // só a(s) do final, e só quando são uma única palavra curta; qualquer legenda
+      // real do meio do vídeo (mesmo curta) não é afetada.
+      while (subtitles.length > 1) {
+        const last = subtitles[subtitles.length - 1].text.trim();
+        const hasNoPunctuation = !/[.,!?…]$/.test(last);
+        const isSingleShortWord = !last.includes(' ') && last.length <= 8;
+        if (isSingleShortWord && hasNoPunctuation) subtitles.pop();
+        else break;
       }
 
       cleanup();
