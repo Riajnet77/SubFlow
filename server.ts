@@ -159,7 +159,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text += `{\\k${durCs}}${String(w.word).trim().toUpperCase()} `;
         prevEnd = w.end;
       }
-      lines.push(`Dialogue: 1,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,,,,${text.trim()}`);
+      lines.push(`Dialogue: 1,${assTime(chunkStart)},${assTime(chunkEnd)},Default,,0,0,0,,${text.trim()}`);
     }
     return lines;
   };
@@ -172,7 +172,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // aqui trocando qualquer quebra de linha por espaço, garantindo uma linha só.
     const sub = { ...rawSub, text: String(rawSub.text).replace(/\r\n|\r|\n/g, ' ').replace(/\s+/g, ' ').trim() };
     if (style.preset === 'viral') return buildKaraokeLines(sub);
-    return [`Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,${formatEmphasis(sub.text)}`];
+    return [`Dialogue: 1,${assTime(sub.start)},${assTime(sub.end)},Default,,,,,,${formatEmphasis(sub.text)}`];
   }).join('\n');
 
   return header + events + '\n';
