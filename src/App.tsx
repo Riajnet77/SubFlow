@@ -407,7 +407,7 @@ function ExportPanel({ subtitles, videoFile, style, onBack, nativeW, nativeH, di
         }, 3000);
       });
 
-      dl(`${API_BASE}/api/render/${jobId}/download`, "subflow_export.mp4");
+      dl(`${API_BASE}/api/render/${jobId}/download`, "video-legendado.mp4");
       setDone(true);
     } catch (e: any) {
       alert("Render failed: " + (e?.message ?? e));
