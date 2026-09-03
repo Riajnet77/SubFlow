@@ -306,33 +306,21 @@ async function startServer() {
         console.log(`[render ${id}] ffmpeg binary: ${ffmpegBinary}`);
         console.log(`[render ${id}] fontsDir (${fontsDir}) contents:`, fs.existsSync(fontsDir) ? fs.readdirSync(fontsDir) : 'NAO EXISTE');
         console.log(`[render ${id}] homeFontsDir (${homeFontsDir}) contents:`, fs.existsSync(homeFontsDir) ? fs.readdirSync(homeFontsDir) : 'NAO EXISTE');
-        // FIX: em vez de confiar em -map 0:v:0 (que pode pegar uma thumbnail/capa
-        // embutida no lugar do vídeo real) e -vf ass=... sozinho (que assume, sem
-        // garantir, que o frame já bate exatamente com o PlayResX/PlayResY do
-        // .ass), agora usamos -filter_complex explicitamente:
-        //   1. Seleciona a stream de vídeo REAL identificada pelo ffprobe acima
-        //      ([0:v:${probed.index}], não mais fixo em 0).
-        //   2. scale+pad força o frame pro exato tamanho que o .ass foi gerado
-        //      pra usar (effectiveStyle.nativeW/H) — elimina qualquer mismatch de
-        //      resolução/SAR entre o que o navegador viu e o que o ffmpeg decodifica.
-        //   3. setsar=1 normaliza pixels não-quadrados (comum em vídeo de rede
-        //      social), que pode fazer o libass calcular posição errada.
-        //   4. ass=... roda por último, já sobre um frame com dimensões garantidas.
-        // Áudio via aac (reencode) em vez de copy: copy pode falhar silenciosamente
-        // se o codec de áudio original não for compatível com o container mp4 de
-        // saída sem re-encode.
-        const targetW = effectiveStyle.nativeW || 1280;
-        const targetH = effectiveStyle.nativeH || 720;
-        const assPathEscaped = assPath.replace(/:/g, '\\:');
-        const filterComplex = `[0:v:${probed.index}]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,setsar=1,ass=${assPathEscaped}[v]`;
-        console.log(`[render ${id}] filter_complex: ${filterComplex}`);
+        // Simplificado de volta pro comando leve: a causa real do bug de legenda
+        // sumida era uma vírgula faltando no template do Dialogue (corrigido em
+        // buildAss), não stream/escala/SAR — confirmado com teste real do vídeo do
+        // usuário. O -filter_complex com scale/pad/setsar + reencode de áudio pra
+        // aac que eu tinha adicionado por precaução só adicionava processamento
+        // (mais lento, sem necessidade) — grave na CPU limitadíssima do plano Free
+        // do Render (0.15 vCPU). Mantemos -map na stream de vídeo real (detectada
+        // pelo ffprobe acima) como rede de segurança barata, mas voltamos a usar
+        // -vf ass=... direto e -c:a copy (sem reencode) para velocidade.
         const ffmpegArgs = [
           '-y', '-i', inputPath,
-          '-filter_complex', filterComplex,
-          '-map', '[v]', '-map', '0:a:0?',
+          '-map', `0:v:${probed.index}`, '-map', '0:a:0?',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-threads', '1', '-tune', 'fastdecode',
-          '-pix_fmt', 'yuv420p',
-          '-c:a', 'aac', '-b:a', '128k',
+          '-vf', `ass=${assPath}`,
+          '-c:a', 'copy',
           '-sn', '-movflags', '+faststart', '-f', 'mp4', outputPath,
         ];
         await new Promise<void>((resolve, reject) => {
